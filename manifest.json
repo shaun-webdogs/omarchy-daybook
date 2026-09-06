@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "shahin.daybook",
+  "name": "Daybook Focus",
+  "version": "1.1.0",
+  "author": "Shahin",
+  "description": "A daily to-do list with focus timers, saved time and browsable history.",
+  "kinds": ["bar-widget", "service"],
+  "entryPoints": {"barWidget": "Widget.qml", "service": "Service.qml"},
+  "barWidget": {
+    "displayName": "Daybook Focus",
+    "description": "Tasks, focus time and daily history",
+    "category": "Time",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
