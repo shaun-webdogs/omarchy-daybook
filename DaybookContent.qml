@@ -142,14 +142,16 @@ FocusScope {
             Item { Layout.fillWidth: true }
             ActionButton {
                 text: "󰒓"; hint: root.settings ? "Back to tasks" : "Settings"; subtle: !root.settings; accent: root.settings
-                leftPadding: Style.space(7); rightPadding: Style.space(7)
+                padding: 0; leftPadding: 0; rightPadding: 0; topPadding: 0; bottomPadding: 0
+                implicitWidth: Style.space(32); implicitHeight: Style.space(32)
                 font.pixelSize: Style.font.icon
                 focusPolicy: Qt.NoFocus
                 onClicked: root.settings = !root.settings
             }
             ActionButton {
                 text: "󰅖"; hint: "Close · Escape"; subtle: true
-                leftPadding: Style.space(7); rightPadding: Style.space(7)
+                padding: 0; leftPadding: 0; rightPadding: 0; topPadding: 0; bottomPadding: 0
+                implicitWidth: Style.space(32); implicitHeight: Style.space(32)
                 font.pixelSize: Style.font.icon
                 focusPolicy: Qt.NoFocus
                 onClicked: root.closeRequested()
