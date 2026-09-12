@@ -147,7 +147,13 @@ FocusScope {
                 focusPolicy: Qt.NoFocus
                 onClicked: root.settings = !root.settings
             }
-            ActionButton { text: "×"; hint: "Close · Escape"; subtle: true; onClicked: root.closeRequested() }
+            ActionButton {
+                text: "󰅖"; hint: "Close · Escape"; subtle: true
+                leftPadding: Style.space(7); rightPadding: Style.space(7)
+                font.pixelSize: Style.font.icon
+                focusPolicy: Qt.NoFocus
+                onClicked: root.closeRequested()
+            }
         }
 
         ColumnLayout {
