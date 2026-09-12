@@ -264,14 +264,24 @@ FocusScope {
                 color: root.secondary; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; font.letterSpacing: 1
             }
             Item { Layout.fillWidth: true }
-            ActionButton {
+            Text {
                 text: root.sortByTime ? "󰓅 Most time first" : "󰒺 My order"
-                hint: root.sortByTime ? "Tasks with the most recorded time rise to the top as you work. Click for your own order." : "Tasks stay where you put them with ▲ ▼. Click to sort by recorded time."
-                subtle: true
-                implicitHeight: Style.space(22)
-                font.pixelSize: Style.font.bodySmall
-                enabled: root.editable
-                onClicked: root.service.send("setSort", {sort: root.sortByTime ? "manual" : "time"})
+                color: Color.accent
+                opacity: root.editable ? 1 : 0.5
+                font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall
+                font.underline: sortMouse.containsMouse
+                Accessible.name: "Task order"
+                MouseArea {
+                    id: sortMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    enabled: root.editable
+                    onClicked: root.service.send("setSort", {sort: root.sortByTime ? "manual" : "time"})
+                    Controls.ToolTip.visible: containsMouse
+                    Controls.ToolTip.delay: 650
+                    Controls.ToolTip.text: root.sortByTime ? "Tasks with the most recorded time rise to the top as you work. Click for your own order." : "Tasks stay where you put them with ▲ ▼. Click to sort by recorded time."
+                }
             }
             Text { text: root.completed + " / " + root.taskCount + " done"; color: root.secondary; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
         }
