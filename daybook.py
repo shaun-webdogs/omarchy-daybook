@@ -236,10 +236,13 @@ class Store:
                     raise ValueError("Sort tasks by time or manually.")
                 self.db.execute("INSERT OR REPLACE INTO meta VALUES('sort', ?)", (sort,))
             elif action == "setPanel":
-                for key in ("width", "height"):
-                    value = request.get(key, 0)
-                    if type(value) is not int or value < 0 or value > 8000:
-                        raise ValueError("Panel size must be a whole number of pixels.")
+                limits = {"width": 8000, "height": 8000, "opacity": 100}
+                for key, limit in limits.items():
+                    if key not in request:
+                        continue
+                    value = request[key]
+                    if type(value) is not int or value < 0 or value > limit:
+                        raise ValueError("Panel size must be whole pixels; opacity is 0 to 100.")
                     self.db.execute("INSERT OR REPLACE INTO meta VALUES(?, ?)", ("panel_" + key, str(value)))
             elif action == "dismiss":
                 self.notice = ""
@@ -280,11 +283,11 @@ class Store:
         for offset in range(7):
             date = (dt.date.fromisoformat(week_start) + dt.timedelta(days=offset)).isoformat()
             week.append({"day": date, "elapsed_ms": totals.get(date, 0)})
-        panel = {row[0][6:]: int(row[1]) for row in self.db.execute("SELECT key, value FROM meta WHERE key IN ('panel_width','panel_height')")}
+        panel = {row[0][6:]: int(row[1]) for row in self.db.execute("SELECT key, value FROM meta WHERE key IN ('panel_width','panel_height','panel_opacity')")}
         return {"today": today, "selected": selected, "tasks": rows, "today_tasks": today_rows, "dates": dates,
                 "active": dict(active_row) if active_row else None, "summary": summary,
                 "week": week, "notice": self.notice, "database": str(self.path), "sort": sort,
-                "panel": {"width": panel.get("width", 0), "height": panel.get("height", 0)}}
+                "panel": {"width": panel.get("width", 0), "height": panel.get("height", 0), "opacity": panel.get("opacity", 100)}}
 
     def sort(self):
         row = self.db.execute("SELECT value FROM meta WHERE key='sort'").fetchone()

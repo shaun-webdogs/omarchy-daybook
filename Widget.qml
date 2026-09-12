@@ -25,6 +25,9 @@ BarWidget {
     property int liveWidth: 0
     property int liveHeight: 0
     property int resizeRequest: 0
+    property int opacityRequest: 0
+    property real previewOpacity: -1
+    readonly property real panelOpacity: previewOpacity >= 0 ? previewOpacity : (panelPref.opacity === undefined ? 100 : panelPref.opacity) / 100
     function clampWidth(w) { return Math.round(Math.min(Math.max(260, w), popup.screen ? popup.screen.width - Style.space(30) : w)) }
     function clampHeight(h) { return Math.round(Math.min(Math.max(250, h), popup.screen ? popup.screen.height - Style.space(70) : h)) }
 
@@ -39,7 +42,10 @@ BarWidget {
 
     Connections {
         target: root.service
-        function onAcknowledged(requestId, success) { if (requestId === root.resizeRequest) root.resizing = false }
+        function onAcknowledged(requestId, success) {
+            if (requestId === root.resizeRequest) root.resizing = false
+            if (requestId === root.opacityRequest) root.previewOpacity = -1
+        }
     }
 
     WidgetButton {
@@ -86,6 +92,19 @@ BarWidget {
                 if (!root.resizeRequest) root.resizing = false
             }
             onResizeReset: if (root.service) root.service.send("setPanel", {width: 0, height: 0})
+            onOpacityPreview: value => root.previewOpacity = value
+            onOpacityCommit: value => {
+                if (!root.service) return
+                root.previewOpacity = value
+                root.opacityRequest = root.service.send("setPanel", {opacity: Math.round(value * 100)})
+                if (!root.opacityRequest) root.previewOpacity = -1
+            }
+        }
+        // The panel card sits two levels above our content; tint it without changing the shared component.
+        Binding {
+            target: content.parent && content.parent.parent && content.parent.parent.borderSpec !== undefined ? content.parent.parent : null
+            property: "color"
+            value: Qt.alpha(Color.popups.background, root.panelOpacity)
         }
     }
 

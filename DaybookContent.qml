@@ -11,7 +11,11 @@ FocusScope {
     signal resizeBy(real dx, real dy)
     signal resizeFinished()
     signal resizeReset()
+    signal opacityPreview(real value)
+    signal opacityCommit(real value)
     property bool history: false
+    property bool settings: false
+    readonly property real panelOpacity: state.panel && state.panel.opacity !== undefined ? state.panel.opacity / 100 : 1
     property int addRequest: 0
     property string submittedTitle: ""
     property string localError: ""
@@ -80,7 +84,7 @@ FocusScope {
     onRowsChanged: syncRows()
     onViewingTodayChanged: syncRows()
     Component.onCompleted: syncRows()
-    Keys.onEscapePressed: closeRequested()
+    Keys.onEscapePressed: settings ? settings = false : closeRequested()
 
     Connections {
         target: root.service
@@ -114,10 +118,70 @@ FocusScope {
                 Text { text: "A little focus, every day."; color: root.secondary; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
             }
             Item { Layout.fillWidth: true }
+            ActionButton {
+                text: "󰒓"; hint: root.settings ? "Back to tasks" : "Settings"; subtle: !root.settings; accent: root.settings
+                leftPadding: Style.space(7); rightPadding: Style.space(7)
+                font.pixelSize: Style.font.icon
+                focusPolicy: Qt.NoFocus
+                onClicked: root.settings = !root.settings
+            }
             ActionButton { text: "×"; hint: "Close · Escape"; subtle: true; onClicked: root.closeRequested() }
         }
 
+        ColumnLayout {
+            visible: root.settings
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: Style.space(14)
+            Text { text: "SETTINGS"; color: root.secondary; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; font.letterSpacing: 1 }
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: opacityColumn.implicitHeight + Style.space(28)
+                radius: Style.cornerRadius
+                color: Qt.alpha(root.foreground, 0.025)
+                border.color: Qt.alpha(root.foreground, 0.08)
+                ColumnLayout {
+                    id: opacityColumn
+                    anchors.fill: parent
+                    anchors.margins: Style.space(14)
+                    spacing: Style.space(8)
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Text { text: "Background opacity"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body }
+                        Item { Layout.fillWidth: true }
+                        Text { text: Math.round(opacitySlider.liveValue * 100) + "%"; color: root.secondary; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
+                    }
+                    Ui.PanelSlider {
+                        id: opacitySlider
+                        Layout.fillWidth: true
+                        minimum: 0.2; maximum: 1; step: 0.05
+                        value: root.panelOpacity
+                        enabled: root.editable
+                        fillColor: Color.accent
+                        knobColor: Color.accent
+                        trackColor: Qt.alpha(root.foreground, 0.15)
+                        onMoved: value => root.opacityPreview(value)
+                        onReleased: value => root.opacityCommit(value)
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: "Lets your wallpaper and windows show through the panel. Text stays fully opaque."
+                        color: root.secondary; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; wrapMode: Text.WordWrap
+                    }
+                }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Style.space(6)
+                ActionButton { text: "Reset opacity"; subtle: true; enabled: root.editable && root.panelOpacity !== 1; onClicked: root.opacityCommit(1) }
+                ActionButton { text: "Reset panel size"; subtle: true; enabled: root.editable; onClicked: root.resizeReset() }
+                Item { Layout.fillWidth: true }
+            }
+            Item { Layout.fillHeight: true }
+        }
+
         Rectangle {
+            visible: !root.settings
             Layout.fillWidth: true
             Layout.preferredHeight: Style.space(114)
             color: Qt.alpha(Color.accent, 0.07)
@@ -167,6 +231,7 @@ FocusScope {
         }
 
         RowLayout {
+            visible: !root.settings
             Layout.fillWidth: true
             spacing: Style.space(5)
             ActionButton {
@@ -182,7 +247,7 @@ FocusScope {
         }
 
         RowLayout {
-            visible: root.history
+            visible: root.history && !root.settings
             Layout.fillWidth: true
             spacing: Style.space(6)
             ActionButton { text: "‹"; hint: "Previous day"; enabled: root.editable; onClicked: root.moveDay(-1) }
@@ -200,7 +265,7 @@ FocusScope {
         }
 
         RowLayout {
-            visible: root.history
+            visible: root.history && !root.settings
             Layout.fillWidth: true
             Layout.preferredHeight: Style.space(56)
             spacing: Style.space(6)
@@ -242,7 +307,7 @@ FocusScope {
         }
 
         RowLayout {
-            visible: !root.history
+            visible: !root.history && !root.settings
             Layout.fillWidth: true
             spacing: Style.space(7)
             Ui.TextField {
@@ -258,7 +323,9 @@ FocusScope {
         }
 
         RowLayout {
+            visible: !root.settings
             Layout.fillWidth: true
+            spacing: Style.space(12)
             Text {
                 text: root.history ? "TASKS · " + root.dateLabel(root.selected, "d MMMM yyyy").toUpperCase() : "YOUR TASKS"
                 color: root.secondary; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; font.letterSpacing: 1
@@ -287,6 +354,7 @@ FocusScope {
         }
 
         Item {
+            visible: !root.settings
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.minimumHeight: Style.space(100)

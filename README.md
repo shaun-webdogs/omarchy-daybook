@@ -85,6 +85,8 @@ Nothing needs to be built.
   Click that label to switch to **My order**, where **▲ ▼** move a task one place
   and right-clicking them sends it to the top or bottom. Open and completed
   tasks keep their own order in both modes.
+- **󰒓** opens settings: a slider for the panel's background opacity (text stays
+  solid), plus reset buttons for opacity and panel size. Escape returns to tasks.
 - Drag the **◢** corner to resize the panel. The size is remembered on every
   monitor; double-click the corner to go back to the default.
 - **×** beside a task archives it without deleting any history.

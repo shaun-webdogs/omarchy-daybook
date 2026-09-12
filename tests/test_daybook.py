@@ -288,13 +288,13 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.store.db.execute("PRAGMA user_version").fetchone()[0], 1)
 
     def test_panel_size_is_remembered(self):
-        self.assertEqual(self.store.snapshot()["panel"], {"width": 0, "height": 0})
+        self.assertEqual(self.store.snapshot()["panel"], {"width": 0, "height": 0, "opacity": 100})
         self.command("setPanel", width=900, height=1200)
-        self.assertEqual(self.store.snapshot()["panel"], {"width": 900, "height": 1200})
-        with self.assertRaises(ValueError):
-            self.command("setPanel", width=-1, height=0)
-        with self.assertRaises(ValueError):
-            self.command("setPanel", width="wide", height=0)
+        self.command("setPanel", opacity=65)
+        self.assertEqual(self.store.snapshot()["panel"], {"width": 900, "height": 1200, "opacity": 65})
+        for bad in ({"width": -1, "height": 0}, {"width": "wide"}, {"opacity": 101}, {"opacity": 0.5}):
+            with self.assertRaises(ValueError):
+                self.command("setPanel", **bad)
 
     def test_existing_database_is_upgraded_in_place(self):
         self.store.db.close()
