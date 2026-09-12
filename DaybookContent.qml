@@ -120,6 +120,22 @@ FocusScope {
     }
     ListModel { id: taskModel }
 
+    // Icon glyphs carry uneven side bearings, so centre the ink rather than the advance box.
+    component IconGlyph: Item {
+        id: glyphItem
+        property string glyph: ""
+        property color tint: root.foreground
+        property real size: Style.font.icon
+        TextMetrics { id: metrics; font.family: root.fontFamily; font.pixelSize: glyphItem.size; text: glyphItem.glyph }
+        Text {
+            text: glyphItem.glyph
+            color: glyphItem.tint
+            font.family: root.fontFamily; font.pixelSize: glyphItem.size
+            x: Math.round((glyphItem.width - metrics.tightBoundingRect.width) / 2 - metrics.tightBoundingRect.x)
+            y: Math.round((glyphItem.height - metrics.tightBoundingRect.height) / 2 - (metrics.tightBoundingRect.y - metrics.boundingRect.y))
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: Style.space(14)
@@ -141,19 +157,20 @@ FocusScope {
             }
             Item { Layout.fillWidth: true }
             ActionButton {
-                text: "󰒓"; hint: root.settings ? "Back to tasks" : "Settings"; subtle: !root.settings; accent: root.settings
+                id: gearButton
+                text: "Settings"; hint: root.settings ? "Back to tasks" : "Settings"; subtle: !root.settings; accent: root.settings
                 padding: 0; leftPadding: 0; rightPadding: 0; topPadding: 0; bottomPadding: 0
                 implicitWidth: Style.space(32); implicitHeight: Style.space(32)
-                font.pixelSize: Style.font.icon
                 focusPolicy: Qt.NoFocus
+                contentItem: IconGlyph { glyph: "󰒓"; tint: gearButton.accent ? Color.background : root.foreground }
                 onClicked: root.settings = !root.settings
             }
             ActionButton {
-                text: "󰅖"; hint: "Close · Escape"; subtle: true
+                text: "Close"; hint: "Close · Escape"; subtle: true
                 padding: 0; leftPadding: 0; rightPadding: 0; topPadding: 0; bottomPadding: 0
                 implicitWidth: Style.space(32); implicitHeight: Style.space(32)
-                font.pixelSize: Style.font.icon
                 focusPolicy: Qt.NoFocus
+                contentItem: IconGlyph { glyph: "󰅖" }
                 onClicked: root.closeRequested()
             }
         }
