@@ -100,12 +100,12 @@ BarWidget {
                 if (!root.opacityRequest) root.previewOpacity = -1
             }
         }
-        // The panel card sits two levels above our content; tint it without changing the shared component.
-        Binding {
-            target: content.parent && content.parent.parent && content.parent.parent.borderSpec !== undefined ? content.parent.parent : null
-            property: "color"
-            value: Qt.alpha(Color.popups.background, root.panelOpacity)
-        }
     }
 
+    // The panel card sits two levels above our content; tint it without changing the shared component.
+    Binding {
+        target: content.parent && content.parent.parent && content.parent.parent.borderSpec !== undefined ? content.parent.parent : null
+        property: "color"
+        value: Qt.alpha(Color.popups.background, root.panelOpacity)
+    }
 }
