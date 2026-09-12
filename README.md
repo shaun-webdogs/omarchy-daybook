@@ -85,6 +85,9 @@ Nothing needs to be built.
   Click that label to switch to **My order**, where **▲ ▼** move a task one place
   and right-clicking them sends it to the top or bottom. Open and completed
   tasks keep their own order in both modes.
+- **󰓹** assigns one tag to a task from a dropdown, for statuses like *Awaiting
+  Client*. The tag shows as a small pill beside the time. Manage the tag list in
+  settings; removing a tag clears it from every task that had it.
 - **󰒓** opens settings: a slider for the panel's background opacity (text stays
   solid), plus reset buttons for opacity and panel size. Escape returns to tasks.
 - Drag the **◢** corner to resize the panel. The size is remembered on every

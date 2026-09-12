@@ -68,6 +68,8 @@ class Store:
                 self.db.execute("ALTER TABLE tasks ADD COLUMN position INTEGER")
             if "note" not in columns:
                 self.db.execute("ALTER TABLE tasks ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+            if "tag" not in columns:
+                self.db.execute("ALTER TABLE tasks ADD COLUMN tag TEXT NOT NULL DEFAULT ''")
             self._adopt_positions()
         self.notice = ""
         # Checkpoints already include their time in days. Never count offline time.
@@ -117,6 +119,34 @@ class Store:
         group.insert(target, group.pop(index))
         for slot, moved in zip(slots, group):
             self.db.execute("UPDATE tasks SET position=? WHERE id=?", (slot, moved))
+
+    DEFAULT_TAGS = ["Awaiting Client", "In Progress", "Blocked"]
+
+    def tags(self):
+        row = self.db.execute("SELECT value FROM meta WHERE key='tags'").fetchone()
+        if not row:
+            return list(self.DEFAULT_TAGS)
+        try:
+            tags = json.loads(row[0])
+        except ValueError:
+            return list(self.DEFAULT_TAGS)
+        return [t for t in tags if isinstance(t, str)]
+
+    @staticmethod
+    def tag_list(value):
+        if not isinstance(value, list) or len(value) > 40:
+            raise ValueError("Send up to 40 tags.")
+        tags = []
+        for tag in value:
+            if not isinstance(tag, str):
+                raise ValueError("Tags must be text.")
+            tag = " ".join(tag.split())
+            if not tag or len(tag) > 40:
+                raise ValueError("Use tag names between 1 and 40 characters.")
+            if tag.casefold() in (t.casefold() for t in tags):
+                raise ValueError("That tag is already in the list.")
+            tags.append(tag)
+        return tags
 
     @staticmethod
     def milliseconds(value):
@@ -183,7 +213,7 @@ class Store:
                 task_id = self.db.execute("INSERT INTO tasks(title, created_day, position) VALUES(?,?,(SELECT COALESCE(MAX(position),0)+1 FROM tasks))", (title, today)).lastrowid
                 self.db.execute("INSERT INTO days(task_id, day, title) VALUES(?,?,?)", (task_id, today, title))
                 result["taskId"] = task_id
-            elif action in ("start", "complete", "reopen", "rename", "archive", "restore", "move", "setTime", "setNote"):
+            elif action in ("start", "complete", "reopen", "rename", "archive", "restore", "move", "setTime", "setNote", "setTag"):
                 task_id = request.get("taskId")
                 if type(task_id) is not int:
                     raise ValueError("Invalid task.")
@@ -192,6 +222,11 @@ class Store:
                     raise ValueError("This task could not be found.")
                 if action == "setNote":
                     self.db.execute("UPDATE tasks SET note=? WHERE id=?", (self.note(request.get("note")), task_id))
+                elif action == "setTag":
+                    tag = request.get("tag") or ""
+                    if not isinstance(tag, str) or (tag and tag not in self.tags()):
+                        raise ValueError("Choose a tag from the list, or none.")
+                    self.db.execute("UPDATE tasks SET tag=? WHERE id=?", (tag, task_id))
                 elif action == "setTime":
                     day = request.get("day") or today
                     if not isinstance(day, str) or dt.date.fromisoformat(day).isoformat() != day or day > today:
@@ -230,6 +265,12 @@ class Store:
                         self.db.execute("UPDATE days SET title=? WHERE task_id=? AND day=?", (title, task_id, today))
             elif action == "pause":
                 self.db.execute("DELETE FROM active")
+            elif action == "setTags":
+                tags = self.tag_list(request.get("tags"))
+                # A tag dropped from the list is cleared from tasks so nothing shows a tag that no longer exists.
+                for removed in set(self.tags()) - set(tags):
+                    self.db.execute("UPDATE tasks SET tag='' WHERE tag=?", (removed,))
+                self.db.execute("INSERT OR REPLACE INTO meta VALUES('tags', ?)", (json.dumps(tags, ensure_ascii=False),))
             elif action == "setSort":
                 sort = request.get("sort")
                 if sort not in ("time", "manual"):
@@ -260,7 +301,7 @@ class Store:
         sort = self.sort()
         def rows_for(day):
             rows = [dict(row) for row in self.db.execute("""
-                SELECT d.*, t.archived, t.note FROM days d JOIN tasks t ON t.id=d.task_id
+                SELECT d.*, t.archived, t.note, t.tag FROM days d JOIN tasks t ON t.id=d.task_id
                 WHERE day=? ORDER BY t.archived, d.completed, CASE WHEN ?='time' THEN -d.elapsed_ms ELSE 0 END, t.position, d.task_id
             """, (day, sort))]
             for row in rows:
@@ -286,7 +327,7 @@ class Store:
         panel = {row[0][6:]: int(row[1]) for row in self.db.execute("SELECT key, value FROM meta WHERE key IN ('panel_width','panel_height','panel_opacity')")}
         return {"today": today, "selected": selected, "tasks": rows, "today_tasks": today_rows, "dates": dates,
                 "active": dict(active_row) if active_row else None, "summary": summary,
-                "week": week, "notice": self.notice, "database": str(self.path), "sort": sort,
+                "week": week, "notice": self.notice, "database": str(self.path), "sort": sort, "tags": self.tags(),
                 "panel": {"width": panel.get("width", 0), "height": panel.get("height", 0), "opacity": panel.get("opacity", 100)}}
 
     def sort(self):

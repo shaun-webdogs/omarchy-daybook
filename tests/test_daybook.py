@@ -287,6 +287,23 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.titles(), ["Synced", "Mine", "Newer"])
         self.assertEqual(self.store.db.execute("PRAGMA user_version").fetchone()[0], 1)
 
+    def test_tags_are_listed_assigned_and_cleared_on_removal(self):
+        self.assertEqual(self.store.snapshot()["tags"], ["Awaiting Client", "In Progress", "Blocked"])
+        task = self.add()
+        self.command("setTag", taskId=task, tag="Awaiting Client")
+        self.assertEqual(self.store.snapshot()["tasks"][0]["tag"], "Awaiting Client")
+        with self.assertRaises(ValueError):
+            self.command("setTag", taskId=task, tag="Not a tag")
+        self.command("setTags", tags=["Blocked", " Needs  Review "])
+        self.assertEqual(self.store.snapshot()["tags"], ["Blocked", "Needs Review"])
+        self.assertEqual(self.store.snapshot()["tasks"][0]["tag"], "")
+        self.command("setTag", taskId=task, tag="Needs Review")
+        self.command("setTag", taskId=task, tag="")
+        self.assertEqual(self.store.snapshot()["tasks"][0]["tag"], "")
+        for bad in (["a", "A"], [""], ["x" * 41], "Blocked", [1], ["t"] * 41):
+            with self.assertRaises(ValueError):
+                self.command("setTags", tags=bad)
+
     def test_panel_size_is_remembered(self):
         self.assertEqual(self.store.snapshot()["panel"], {"width": 0, "height": 0, "opacity": 100})
         self.command("setPanel", width=900, height=1200)

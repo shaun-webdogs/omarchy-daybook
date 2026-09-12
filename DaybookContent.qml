@@ -15,6 +15,20 @@ FocusScope {
     signal opacityCommit(real value)
     property bool history: false
     property bool settings: false
+    property int tagMenuTask: 0
+    property string tagMenuCurrent: ""
+    property point tagMenuPos: Qt.point(0, 0)
+    readonly property var tagList: state.tags || []
+    function openTagMenu(item, taskId, current) {
+        var pos = item.mapToItem(root, 0, item.height + Style.space(4))
+        tagMenuPos = Qt.point(Math.max(0, Math.min(pos.x, root.width - tagMenu.width)), Math.min(pos.y, root.height - tagMenu.height))
+        tagMenuCurrent = current
+        tagMenuTask = taskId
+    }
+    function chooseTag(tag) {
+        if (editable && tagMenuTask) service.send("setTag", {taskId: tagMenuTask, tag: tag})
+        tagMenuTask = 0
+    }
     readonly property real panelOpacity: state.panel && state.panel.opacity !== undefined ? state.panel.opacity / 100 : 1
     property int addRequest: 0
     property string submittedTitle: ""
@@ -66,7 +80,10 @@ FocusScope {
     // Keep delegates (and their open editors) alive: move rows into place rather than rebuilding on reorder.
     function syncRows() {
         var wanted = rows.filter(t => !viewingToday || !t.archived)
-        for (var w = 0; w < wanted.length; ++w) if (wanted[w].note === undefined) wanted[w].note = ""
+        for (var w = 0; w < wanted.length; ++w) {
+            if (wanted[w].note === undefined) wanted[w].note = ""
+            if (wanted[w].tag === undefined) wanted[w].tag = ""
+        }
         var present = {}
         for (var i = 0; i < taskModel.count; ++i) present[taskModel.get(i).task_id] = true
         if (taskModel.count !== wanted.length || !wanted.every(t => present[t.task_id])) {
@@ -84,7 +101,7 @@ FocusScope {
     onRowsChanged: syncRows()
     onViewingTodayChanged: syncRows()
     Component.onCompleted: syncRows()
-    Keys.onEscapePressed: settings ? settings = false : closeRequested()
+    Keys.onEscapePressed: tagMenuTask ? tagMenuTask = 0 : settings ? settings = false : closeRequested()
 
     Connections {
         target: root.service
@@ -177,7 +194,93 @@ FocusScope {
                 ActionButton { text: "Reset panel size"; subtle: true; enabled: root.editable; onClicked: root.resizeReset() }
                 Item { Layout.fillWidth: true }
             }
-            Item { Layout.fillHeight: true }
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.minimumHeight: Style.space(120)
+                radius: Style.cornerRadius
+                color: Qt.alpha(root.foreground, 0.025)
+                border.color: Qt.alpha(root.foreground, 0.08)
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: Style.space(14)
+                    spacing: Style.space(8)
+                    Text { text: "Tags"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body }
+                    Text {
+                        Layout.fillWidth: true
+                        text: "Each task can carry one tag, picked from this list with 󰓹. Removing a tag clears it from tasks."
+                        color: root.secondary; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; wrapMode: Text.WordWrap
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Style.space(7)
+                        Ui.TextField {
+                            id: newTag
+                            Layout.fillWidth: true
+                            placeholderText: "New tag, e.g. Awaiting Client"
+                            maximumLength: 40
+                            Accessible.name: "New tag"
+                            onAccepted: addTagButton.clicked()
+                        }
+                        ActionButton {
+                            id: addTagButton
+                            text: "+ Add"; accent: true
+                            enabled: root.editable && newTag.text.trim() !== ""
+                            onClicked: {
+                                var tags = root.tagList.slice()
+                                var name = newTag.text.trim()
+                                if (tags.some(t => t.toLowerCase() === name.toLowerCase())) { root.localError = "That tag is already in the list."; return }
+                                tags.push(name)
+                                root.service.send("setTags", {tags: tags})
+                                newTag.text = ""
+                            }
+                        }
+                    }
+                    Flickable {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        contentHeight: tagFlow.implicitHeight
+                        boundsBehavior: Flickable.StopAtBounds
+                        Flow {
+                            id: tagFlow
+                            width: parent.width
+                            spacing: Style.space(6)
+                            Repeater {
+                                model: root.tagList
+                                delegate: Rectangle {
+                                    required property string modelData
+                                    required property int index
+                                    width: tagRow.implicitWidth + Style.space(16)
+                                    height: Style.space(26)
+                                    radius: Style.cornerRadius
+                                    color: Qt.alpha(Color.accent, 0.12)
+                                    border.color: Qt.alpha(Color.accent, 0.3)
+                                    RowLayout {
+                                        id: tagRow
+                                        anchors.centerIn: parent
+                                        spacing: Style.space(6)
+                                        Text { text: modelData; color: Color.accent; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
+                                        Text {
+                                            text: "×"; color: Color.accent; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall
+                                            opacity: removeMouse.containsMouse ? 1 : 0.6
+                                            MouseArea {
+                                                id: removeMouse
+                                                anchors.fill: parent; anchors.margins: -Style.space(4)
+                                                hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                                enabled: root.editable
+                                                onClicked: root.service.send("setTags", {tags: root.tagList.filter((t, i) => i !== index)})
+                                                Controls.ToolTip.visible: containsMouse
+                                                Controls.ToolTip.text: "Remove tag and clear it from tasks"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         Rectangle {
@@ -378,6 +481,7 @@ FocusScope {
                     required property int archived
                     required property bool running
                     required property string note
+                    required property string tag
                     property bool editing: false
                     property bool editingTime: false
                     property bool showNote: false
@@ -498,6 +602,15 @@ FocusScope {
                                         color: taskRow.running ? Color.accent : root.secondary
                                         font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall
                                     }
+                                    Rectangle {
+                                        visible: !taskRow.editingTime && taskRow.tag !== ""
+                                        Layout.preferredWidth: tagLabel.implicitWidth + Style.space(12)
+                                        Layout.preferredHeight: Style.space(17)
+                                        Layout.leftMargin: Style.space(4)
+                                        radius: Style.cornerRadius
+                                        color: Qt.alpha(Color.accent, 0.14)
+                                        Text { id: tagLabel; anchors.centerIn: parent; text: taskRow.tag; color: Color.accent; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+                                    }
                                     Text {
                                         visible: taskRow.editingTime
                                         text: "Enter saves · Esc cancels"
@@ -530,6 +643,23 @@ FocusScope {
                                         }
                                     }
                                 }
+                            }
+                            ActionButton {
+                                id: tagButton
+                                visible: root.viewingToday
+                                text: "󰓹"
+                                hint: taskRow.tag ? taskRow.tag + " · click to change" : "Tag this task"
+                                subtle: true
+                                leftPadding: Style.space(6); rightPadding: Style.space(6)
+                                focusPolicy: Qt.NoFocus
+                                enabled: root.editable
+                                contentItem: Text {
+                                    text: "󰓹"; font.family: root.fontFamily; font.pixelSize: Style.font.icon
+                                    color: taskRow.tag ? Color.accent : root.foreground
+                                    opacity: taskRow.tag ? 1 : 0.5
+                                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                                }
+                                onClicked: root.tagMenuTask === taskRow.task_id ? root.tagMenuTask = 0 : root.openTagMenu(tagButton, taskRow.task_id, taskRow.tag)
                             }
                             ActionButton {
                                 text: "󰎞"
@@ -649,6 +779,73 @@ FocusScope {
                 elide: Text.ElideRight
             }
             ActionButton { text: "Export ↗"; hint: "Export all daily task times to CSV"; subtle: true; enabled: root.editable; onClicked: root.service.send("export") }
+        }
+    }
+
+    // Tag dropdown: one menu for the whole list, placed under whichever 󰓹 was clicked.
+    MouseArea {
+        anchors.fill: parent
+        visible: root.tagMenuTask !== 0
+        z: 20
+        acceptedButtons: Qt.AllButtons
+        onClicked: root.tagMenuTask = 0
+        onWheel: wheel => wheel.accepted = true
+    }
+    Rectangle {
+        id: tagMenu
+        visible: root.tagMenuTask !== 0
+        z: 21
+        x: root.tagMenuPos.x
+        y: root.tagMenuPos.y
+        width: Math.max(Style.space(160), tagMenuColumn.implicitWidth + Style.space(12))
+        height: tagMenuColumn.implicitHeight + Style.space(12)
+        radius: Style.cornerRadius
+        color: Color.popups.background
+        border.color: Qt.alpha(root.foreground, 0.18)
+        Column {
+            id: tagMenuColumn
+            anchors.fill: parent
+            anchors.margins: Style.space(6)
+            spacing: Style.space(2)
+            Repeater {
+                model: [""].concat(root.tagList)
+                delegate: Rectangle {
+                    id: tagOption
+                    required property string modelData
+                    readonly property bool current: modelData === root.tagMenuCurrent
+                    width: tagMenuColumn.width
+                    height: Style.space(26)
+                    radius: Style.cornerRadius
+                    color: optionMouse.containsMouse ? Qt.alpha(Color.accent, 0.12) : "transparent"
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: Style.space(8); anchors.rightMargin: Style.space(8)
+                        Text {
+                            Layout.fillWidth: true
+                            text: tagOption.modelData === "" ? "No tag" : tagOption.modelData
+                            color: tagOption.modelData === "" ? root.secondary : root.foreground
+                            font.family: root.fontFamily; font.pixelSize: Style.font.body
+                            font.italic: tagOption.modelData === ""
+                            elide: Text.ElideRight
+                        }
+                        Text { visible: tagOption.current; text: "✓"; color: Color.accent; font.family: root.fontFamily; font.pixelSize: Style.font.body }
+                    }
+                    MouseArea {
+                        id: optionMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.chooseTag(tagOption.modelData)
+                    }
+                }
+            }
+            Text {
+                visible: root.tagList.length === 0
+                width: tagMenuColumn.width
+                padding: Style.space(6)
+                text: "No tags yet. Add some in Settings (󰒓)."
+                color: root.secondary; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; wrapMode: Text.WordWrap
+            }
         }
     }
 

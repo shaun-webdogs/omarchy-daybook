@@ -16,10 +16,10 @@ ShellRoot {
             active: {task_id: 1, title: "Design the reading corner", elapsed_ms: 2538000},
             summary: {total: 3, completed: 1, elapsed_ms: 5238000},
             tasks: [
-                {task_id: 1, title: "Design the reading corner", elapsed_ms: 2538000, completed: 0, archived: 0, running: true, note: "Measure the alcove first. Lamp on the left, shelf no deeper than 25 cm."},
-                {task_id: 2, title: "Plan meals for the week", elapsed_ms: 0, completed: 0, archived: 0, running: false, note: ""},
-                {task_id: 3, title: "Morning pages", elapsed_ms: 2700000, completed: 1, archived: 0, running: false, note: ""}],
-            panel: {width: 0, height: 0},
+                {task_id: 1, title: "Design the reading corner", elapsed_ms: 2538000, completed: 0, archived: 0, running: true, note: "Measure the alcove first. Lamp on the left, shelf no deeper than 25 cm.", tag: ""},
+                {task_id: 2, title: "Plan meals for the week", elapsed_ms: 0, completed: 0, archived: 0, running: false, note: "", tag: "Awaiting Client"},
+                {task_id: 3, title: "Morning pages", elapsed_ms: 2700000, completed: 1, archived: 0, running: false, note: "", tag: ""}],
+            panel: {width: 0, height: 0}, tags: ["Awaiting Client", "In Progress", "Blocked"],
             week: [
                 {day: "2026-08-31", elapsed_ms: 4000000}, {day: "2026-09-01", elapsed_ms: 7200000},
                 {day: "2026-09-02", elapsed_ms: 5200000}, {day: "2026-09-03", elapsed_ms: 9400000},
@@ -41,8 +41,8 @@ ShellRoot {
             snapshot.active = null
             snapshot.selected = "2026-09-05"
             snapshot.tasks = [
-                {task_id: 1, title: "Read & take notes", elapsed_ms: 5100000, completed: 1, archived: 0, running: false, note: ""},
-                {task_id: 2, title: "A walk, then a fresh draft", elapsed_ms: 2700000, completed: 1, archived: 0, running: false, note: ""}]
+                {task_id: 1, title: "Read & take notes", elapsed_ms: 5100000, completed: 1, archived: 0, running: false, note: "", tag: ""},
+                {task_id: 2, title: "A walk, then a fresh draft", elapsed_ms: 2700000, completed: 1, archived: 0, running: false, note: "", tag: ""}]
             state = snapshot
         }
     }
