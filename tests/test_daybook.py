@@ -199,6 +199,99 @@ class StoreTests(unittest.TestCase):
                 os.environ["TZ"] = prior
             time.tzset()
 
+    def test_set_time_edits_today_and_past_days(self):
+        task = self.add()
+        self.command("start", taskId=task)
+        self.advance(5)
+        self.command("setTime", taskId=task, elapsed_ms=90_000)
+        self.advance(2)
+        self.assertEqual(self.store.snapshot()["tasks"][0]["elapsed_ms"], 92_000)
+        self.assertIsNotNone(self.store.snapshot()["active"])
+        self.now += 86400 * 1000
+        self.store.tick()
+        self.command("setTime", taskId=task, elapsed_ms=1_000, day="2026-09-06")
+        self.assertEqual(self.store.snapshot("2026-09-06")["tasks"][0]["elapsed_ms"], 1_000)
+        for bad in ({"elapsed_ms": -1}, {"elapsed_ms": 86_400_001}, {"elapsed_ms": "5"}, {"elapsed_ms": 0, "day": "2999-01-01"}, {"elapsed_ms": 0, "day": "2026-09-01"}):
+            with self.assertRaises(ValueError):
+                self.command("setTime", taskId=task, **bad)
+
+    def test_notes_are_saved_per_task(self):
+        task = self.add()
+        self.command("setNote", taskId=task, note="  Call back after 2pm\r\nAsk about invoice  ")
+        self.assertEqual(self.store.snapshot()["tasks"][0]["note"], "Call back after 2pm\nAsk about invoice")
+        self.command("setNote", taskId=task, note="")
+        self.assertEqual(self.store.snapshot()["tasks"][0]["note"], "")
+        with self.assertRaises(ValueError):
+            self.command("setNote", taskId=task, note="x" * 4001)
+        with self.assertRaises(ValueError):
+            self.command("setNote", taskId=task, note=None)
+
+    def titles(self, day=None):
+        return [r["title"] for r in self.store.snapshot(day)["tasks"]]
+
+    def test_move_reorders_within_open_and_completed_groups(self):
+        for title in "ABCD":
+            self.add(title)
+        self.command("move", taskId=3, to="up")
+        self.assertEqual(self.titles(), ["A", "C", "B", "D"])
+        self.command("move", taskId=4, to="top")
+        self.assertEqual(self.titles(), ["D", "A", "C", "B"])
+        self.command("move", taskId=4, to="bottom")
+        self.assertEqual(self.titles(), ["A", "C", "B", "D"])
+        self.command("move", taskId=1, to="up")  # already first: no change, no error
+        self.assertEqual(self.titles(), ["A", "C", "B", "D"])
+        self.command("complete", taskId=3)
+        self.command("complete", taskId=1)
+        self.assertEqual(self.titles(), ["B", "D", "A", "C"])
+        self.command("move", taskId=3, to="up")
+        self.assertEqual(self.titles(), ["B", "D", "C", "A"])
+        self.command("reopen", taskId=3)
+        self.assertEqual(self.titles(), ["C", "B", "D", "A"])
+        with self.assertRaises(ValueError):
+            self.command("move", taskId=2, to="sideways")
+        self.now += 86400 * 1000
+        self.store.tick()
+        self.assertEqual(self.titles(), ["C", "B", "D"])
+
+    def test_tasks_added_by_other_tools_queue_at_the_end(self):
+        self.add("Mine")
+        self.store.db.execute("INSERT INTO tasks(title, created_day) VALUES('Synced', '2026-09-06')")
+        self.store.db.execute("INSERT INTO days(task_id, day, title) VALUES(2, '2026-09-06', 'Synced')")
+        self.store.db.commit()
+        self.store.tick()
+        self.command("move", taskId=1, to="bottom")
+        self.assertEqual(self.titles(), ["Synced", "Mine"])
+        self.add("Newer")
+        self.assertEqual(self.titles(), ["Synced", "Mine", "Newer"])
+        self.assertEqual(self.store.db.execute("PRAGMA user_version").fetchone()[0], 1)
+
+    def test_panel_size_is_remembered(self):
+        self.assertEqual(self.store.snapshot()["panel"], {"width": 0, "height": 0})
+        self.command("setPanel", width=900, height=1200)
+        self.assertEqual(self.store.snapshot()["panel"], {"width": 900, "height": 1200})
+        with self.assertRaises(ValueError):
+            self.command("setPanel", width=-1, height=0)
+        with self.assertRaises(ValueError):
+            self.command("setPanel", width="wide", height=0)
+
+    def test_existing_database_is_upgraded_in_place(self):
+        self.store.db.close()
+        path = Path(self.temp.name) / "old.sqlite3"
+        with sqlite3.connect(path) as old:
+            old.executescript("""
+                CREATE TABLE tasks (id INTEGER PRIMARY KEY, title TEXT NOT NULL, created_day TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0);
+                CREATE TABLE days (task_id INTEGER NOT NULL REFERENCES tasks(id), day TEXT NOT NULL, title TEXT NOT NULL,
+                    elapsed_ms INTEGER NOT NULL DEFAULT 0 CHECK(elapsed_ms >= 0), completed INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(task_id, day));
+                INSERT INTO tasks(title, created_day) VALUES('Old', '2026-09-06'), ('Older', '2026-09-06');
+                INSERT INTO days(task_id, day, title) VALUES(1, '2026-09-06', 'Old'), (2, '2026-09-06', 'Older');
+                PRAGMA user_version=1;
+            """)
+        self.store = Store(path, now=lambda: self.now)
+        self.assertEqual(self.titles(), ["Old", "Older"])
+        self.assertEqual(self.store.snapshot()["tasks"][0]["note"], "")
+        self.command("move", taskId=2, to="top")
+        self.assertEqual(self.titles(), ["Older", "Old"])
+
 
 class ProtocolTests(unittest.TestCase):
     def test_service_roundtrip_errors_export_and_clean_eof(self):

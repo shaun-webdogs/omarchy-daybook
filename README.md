@@ -13,11 +13,18 @@ Native Quickshell UI · Live Omarchy themes · Local SQLite storage · MIT licen
 - Start, pause, complete, and reopen tasks without resetting their recorded time.
 - Save every task immediately, including unfinished tasks with zero time.
 - Carry unfinished tasks into a new day while preserving each day's totals.
+- Correct a recorded time by clicking it, on today or any past day.
+- Keep a note on each task; the note icon lights up when there is one.
+- Reorder tasks with the arrows so the important work sits at the top.
+- Drag the corner to make the panel as tall or wide as your screen allows.
 - Browse previous days, use the seven-day chart, and export all history as CSV.
 - Use one shared timer across monitors; move the widget left, center, or right.
 - Keep everything on your device. No accounts, network requests, or telemetry.
 
 ## Install
+
+This is Shaun's fork of [ShahinMohamed/omarchy-daybook](https://github.com/ShahinMohamed/omarchy-daybook),
+adding editable times, notes, reordering and a resizable panel.
 
 Requires **Omarchy 4 / Quattro with its Quickshell shell** and **system Python 3**
 with SQLite support (`/usr/bin/python3`). Git is used for installation and updates.
@@ -27,7 +34,7 @@ daemon setup, API keys, or system-wide configuration changes are needed.
 From a terminal in your Omarchy desktop:
 
 ```bash
-omarchy plugin add https://github.com/ShahinMohamed/omarchy-daybook --enable
+omarchy plugin add https://github.com/shaun-webdogs/omarchy-daybook --enable
 ```
 
 Choose **left**, **center**, or **right** when prompted. The default placement is
@@ -45,7 +52,7 @@ omarchy bar move shahin.daybook --section right
 ### Install from a local checkout
 
 ```bash
-git clone https://github.com/ShahinMohamed/omarchy-daybook.git
+git clone https://github.com/shaun-webdogs/omarchy-daybook.git
 cd omarchy-daybook
 python3 install.py --section right
 ```
@@ -66,6 +73,16 @@ Nothing needs to be built.
 - **Ⅱ** pauses; **○** completes the task and saves its total.
 - **Reopen** keeps the existing total. Press play to append more time.
 - Double-click a task name to rename it; Enter saves and Escape cancels.
+- Click a task's time to correct it. Type `1:30`, `1:30:00`, `1h30m`, `45m`, or a bare
+  number of minutes; Enter saves and Escape cancels. This works in History too, so
+  a forgotten timer can be fixed on the day it belongs to.
+- **󰎞** opens a note under the task. Ctrl+Enter or **Save** stores it, Escape closes
+  without saving, and clicking elsewhere saves any change. The icon turns accent
+  when a note exists; hover it to read the note without opening it.
+- **▲ ▼** move a task one place; right-click them to send it to the top or bottom.
+  Open and completed tasks keep their own order.
+- Drag the **◢** corner to resize the panel. The size is remembered on every
+  monitor; double-click the corner to go back to the default.
 - **×** beside a task archives it without deleting any history.
 - **History** shows each day's tasks and exact time, including unfinished tasks
   with zero time. Use the arrows, enter a date, or click a bar in the seven-day chart.
@@ -93,6 +110,8 @@ At midnight a running interval is split across local calendar dates. Unfinished
 tasks carry forward with a fresh daily total, including days while the shell was
 off. Completed and archived tasks stay in history until brought back explicitly.
 Renaming changes today's entry and future days; previous titles stay intact.
+Editing a time replaces that day's total for the task; a running timer keeps counting
+from the new value. Notes and task order live on the task itself, not on a day.
 
 On a shell restart, reload or reboot, a running task is paused at the last saved
 checkpoint. Offline time is not added; click play to continue. After sleep or a

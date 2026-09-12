@@ -61,6 +61,14 @@ class Store:
             CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
             PRAGMA user_version=1;
         """)
+        # Added columns keep user_version 1: older readers ignore them, and sync scripts still open the file.
+        columns = {row[1] for row in self.db.execute("PRAGMA table_info(tasks)")}
+        with self.db:
+            if "position" not in columns:
+                self.db.execute("ALTER TABLE tasks ADD COLUMN position INTEGER")
+            if "note" not in columns:
+                self.db.execute("ALTER TABLE tasks ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+            self._adopt_positions()
         self.notice = ""
         # Checkpoints already include their time in days. Never count offline time.
         with self.db:
@@ -84,6 +92,46 @@ class Store:
             previous = following
         if not row or previous != row[0]:
             self.db.execute("INSERT OR REPLACE INTO meta VALUES('day', ?)", (max(previous, today),))
+
+    def _adopt_positions(self):
+        # Tasks written by other tools have no position; queue them after everything else in id order.
+        if self.db.execute("SELECT 1 FROM tasks WHERE position IS NULL LIMIT 1").fetchone():
+            self.db.execute("UPDATE tasks SET position=id+(SELECT COALESCE(MAX(position),0) FROM tasks) WHERE position IS NULL")
+
+    def _move(self, task_id, where, today):
+        # Reorder inside the task's own group (open or completed) by reusing that group's position values.
+        completed = self.db.execute("SELECT completed FROM days WHERE task_id=? AND day=?", (task_id, today)).fetchone()
+        if not completed:
+            raise ValueError("Add this task to today first.")
+        group = [row[0] for row in self.db.execute("""
+            SELECT t.id FROM days d JOIN tasks t ON t.id=d.task_id
+            WHERE d.day=? AND d.completed=? AND t.archived=0 ORDER BY t.position, t.id
+        """, (today, completed[0]))]
+        slots = sorted(row[0] for row in self.db.execute(
+            "SELECT position FROM tasks WHERE id IN (%s)" % ",".join("?" * len(group)), group))
+        index = group.index(task_id)
+        target = {"up": index - 1, "down": index + 1, "top": 0, "bottom": len(group) - 1}.get(where)
+        if target is None:
+            raise ValueError("Move a task up, down, top or bottom.")
+        target = max(0, min(len(group) - 1, target))
+        group.insert(target, group.pop(index))
+        for slot, moved in zip(slots, group):
+            self.db.execute("UPDATE tasks SET position=? WHERE id=?", (slot, moved))
+
+    @staticmethod
+    def milliseconds(value):
+        if type(value) is not int or value < 0 or value > 86_400_000:
+            raise ValueError("Enter a time between 0 and 24 hours.")
+        return value
+
+    @staticmethod
+    def note(value):
+        if not isinstance(value, str):
+            raise ValueError("Enter a note.")
+        value = value.replace("\r\n", "\n").strip()
+        if len(value) > 4000:
+            raise ValueError("Keep notes under 4000 characters.")
+        return value
 
     def _checkpoint(self, now):
         active = self.db.execute("SELECT * FROM active").fetchone()
@@ -110,6 +158,7 @@ class Store:
     def tick(self):
         with self.db:
             self._checkpoint(self.now())
+            self._adopt_positions()
 
     @staticmethod
     def title(value):
@@ -131,17 +180,31 @@ class Store:
             self._checkpoint(now)
             if action == "add":
                 title = self.title(request.get("title"))
-                task_id = self.db.execute("INSERT INTO tasks(title, created_day) VALUES(?,?)", (title, today)).lastrowid
+                task_id = self.db.execute("INSERT INTO tasks(title, created_day, position) VALUES(?,?,(SELECT COALESCE(MAX(position),0)+1 FROM tasks))", (title, today)).lastrowid
                 self.db.execute("INSERT INTO days(task_id, day, title) VALUES(?,?,?)", (task_id, today, title))
                 result["taskId"] = task_id
-            elif action in ("start", "complete", "reopen", "rename", "archive", "restore"):
+            elif action in ("start", "complete", "reopen", "rename", "archive", "restore", "move", "setTime", "setNote"):
                 task_id = request.get("taskId")
                 if type(task_id) is not int:
                     raise ValueError("Invalid task.")
                 task = self.db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
                 if not task:
                     raise ValueError("This task could not be found.")
-                if action == "restore":
+                if action == "setNote":
+                    self.db.execute("UPDATE tasks SET note=? WHERE id=?", (self.note(request.get("note")), task_id))
+                elif action == "setTime":
+                    day = request.get("day") or today
+                    if not isinstance(day, str) or dt.date.fromisoformat(day).isoformat() != day or day > today:
+                        raise ValueError("Choose today or a previous date (YYYY-MM-DD).")
+                    elapsed = self.milliseconds(request.get("elapsed_ms"))
+                    if not self.db.execute("SELECT 1 FROM days WHERE task_id=? AND day=?", (task_id, day)).fetchone():
+                        raise ValueError("This task has no entry on that day.")
+                    self.db.execute("UPDATE days SET elapsed_ms=? WHERE task_id=? AND day=?", (elapsed, task_id, day))
+                elif action == "move":
+                    if task["archived"]:
+                        raise ValueError("Bring this task back to today before moving it.")
+                    self._move(task_id, request.get("to"), today)
+                elif action == "restore":
                     self.db.execute("UPDATE tasks SET archived=0 WHERE id=?", (task_id,))
                     self.db.execute("INSERT OR IGNORE INTO days(task_id, day, title) VALUES(?,?,?)", (task_id, today, task["title"]))
                     self.db.execute("UPDATE days SET completed=0 WHERE task_id=? AND day=?", (task_id, today))
@@ -167,6 +230,12 @@ class Store:
                         self.db.execute("UPDATE days SET title=? WHERE task_id=? AND day=?", (title, task_id, today))
             elif action == "pause":
                 self.db.execute("DELETE FROM active")
+            elif action == "setPanel":
+                for key in ("width", "height"):
+                    value = request.get(key, 0)
+                    if type(value) is not int or value < 0 or value > 8000:
+                        raise ValueError("Panel size must be a whole number of pixels.")
+                    self.db.execute("INSERT OR REPLACE INTO meta VALUES(?, ?)", ("panel_" + key, str(value)))
             elif action == "dismiss":
                 self.notice = ""
             elif action != "snapshot":
@@ -182,8 +251,8 @@ class Store:
         active_id = active[0] if active else 0
         def rows_for(day):
             rows = [dict(row) for row in self.db.execute("""
-                SELECT d.*, t.archived FROM days d JOIN tasks t ON t.id=d.task_id
-                WHERE day=? ORDER BY t.archived, d.completed, d.task_id
+                SELECT d.*, t.archived, t.note FROM days d JOIN tasks t ON t.id=d.task_id
+                WHERE day=? ORDER BY t.archived, d.completed, t.position, d.task_id
             """, (day,))]
             for row in rows:
                 row["running"] = row["task_id"] == active_id and day == today
@@ -205,9 +274,11 @@ class Store:
         for offset in range(7):
             date = (dt.date.fromisoformat(week_start) + dt.timedelta(days=offset)).isoformat()
             week.append({"day": date, "elapsed_ms": totals.get(date, 0)})
+        panel = {row[0][6:]: int(row[1]) for row in self.db.execute("SELECT key, value FROM meta WHERE key IN ('panel_width','panel_height')")}
         return {"today": today, "selected": selected, "tasks": rows, "today_tasks": today_rows, "dates": dates,
                 "active": dict(active_row) if active_row else None, "summary": summary,
-                "week": week, "notice": self.notice, "database": str(self.path)}
+                "week": week, "notice": self.notice, "database": str(self.path),
+                "panel": {"width": panel.get("width", 0), "height": panel.get("height", 0)}}
 
     def export_csv(self):
         output = io.StringIO()

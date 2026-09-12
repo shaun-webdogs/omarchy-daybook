@@ -19,6 +19,15 @@ BarWidget {
     implicitWidth: button.implicitWidth
     implicitHeight: button.implicitHeight
 
+    // Panel size: the saved preference wins, the live drag overrides it until the save is confirmed.
+    readonly property var panelPref: service && service.state.panel ? service.state.panel : ({width: 0, height: 0})
+    property bool resizing: false
+    property int liveWidth: 0
+    property int liveHeight: 0
+    property int resizeRequest: 0
+    function clampWidth(w) { return Math.round(Math.min(Math.max(260, w), popup.screen ? popup.screen.width - Style.space(30) : w)) }
+    function clampHeight(h) { return Math.round(Math.min(Math.max(250, h), popup.screen ? popup.screen.height - Style.space(70) : h)) }
+
     function open() { opened = true }
     function close() { opened = false }
     function toggle() { opened = !opened }
@@ -26,6 +35,11 @@ BarWidget {
         popoutSwitchClosing = true
         close()
         Qt.callLater(() => { root.popoutSwitchClosing = false })
+    }
+
+    Connections {
+        target: root.service
+        function onAcknowledged(requestId, success) { if (requestId === root.resizeRequest) root.resizing = false }
     }
 
     WidgetButton {
@@ -53,14 +67,25 @@ BarWidget {
         open: root.opened
         popoutSwitchClosing: root.popoutSwitchClosing
         padding: Style.space(20)
-        contentWidth: Math.min(Style.space(500), Math.max(260, screen ? screen.width - Style.space(30) : 500))
-        contentHeight: Math.min(Style.space(680), Math.max(250, screen ? screen.height - Style.space(70) : 680))
+        contentWidth: root.clampWidth(root.resizing ? root.liveWidth : root.panelPref.width || Style.space(500))
+        contentHeight: root.clampHeight(root.resizing ? root.liveHeight : root.panelPref.height || Style.space(680))
         focusTarget: content
         DaybookContent {
             id: content
             anchors.fill: parent
             service: root.service
             onCloseRequested: root.close()
+            onResizeBy: (dx, dy) => {
+                if (!root.resizing) { root.liveWidth = popup.contentWidth; root.liveHeight = popup.contentHeight; root.resizing = true }
+                root.liveWidth = root.clampWidth(root.liveWidth + dx)
+                root.liveHeight = root.clampHeight(root.liveHeight + dy)
+            }
+            onResizeFinished: {
+                if (!root.resizing || !root.service) return
+                root.resizeRequest = root.service.send("setPanel", {width: root.liveWidth, height: root.liveHeight})
+                if (!root.resizeRequest) root.resizing = false
+            }
+            onResizeReset: if (root.service) root.service.send("setPanel", {width: 0, height: 0})
         }
     }
 

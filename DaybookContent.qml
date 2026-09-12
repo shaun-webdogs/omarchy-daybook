@@ -8,9 +8,13 @@ FocusScope {
     id: root
     required property var service
     signal closeRequested()
+    signal resizeBy(real dx, real dy)
+    signal resizeFinished()
+    signal resizeReset()
     property bool history: false
     property int addRequest: 0
     property string submittedTitle: ""
+    property string localError: ""
     readonly property var state: service ? service.state : ({})
     readonly property var rows: (history ? state.tasks : state.today_tasks || state.tasks) || []
     readonly property string today: state.today || Qt.formatDate(new Date(), "yyyy-MM-dd")
@@ -29,6 +33,17 @@ FocusScope {
 
     function duration(ms) { return service ? service.duration(ms) : "00:00:00" }
     function dateLabel(day, format) { return Qt.formatDate(new Date(day + "T12:00:00"), format) }
+    // Accepts 1:30, 1:30:00, 1h30m, 45m, 90s, or a bare number of minutes. Returns -1 when unreadable.
+    function parseDuration(text) {
+        var s = String(text).trim().toLowerCase().replace(/\s+/g, "")
+        var m
+        if ((m = s.match(/^(\d+):(\d{1,2})(?::(\d{1,2}))?$/)))
+            return (Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3] || 0)) * 1000
+        if ((m = s.match(/^(?:(\d+(?:\.\d+)?)h)?(?:(\d+(?:\.\d+)?)m)?(?:(\d+)s)?$/)) && s !== "")
+            return Math.round((Number(m[1] || 0) * 3600 + Number(m[2] || 0) * 60 + Number(m[3] || 0)) * 1000)
+        if ((m = s.match(/^(\d+(?:\.\d+)?)$/))) return Math.round(Number(m[1]) * 60000)
+        return -1
+    }
     function selectDay(day) {
         if (!editable) return
         service.send("snapshot", {date: day === today && !history ? "" : day})
@@ -43,17 +58,22 @@ FocusScope {
         submittedTitle = newTask.text
         addRequest = service.send("add", {title: submittedTitle})
     }
+    // Keep delegates (and their open editors) alive: move rows into place rather than rebuilding on reorder.
     function syncRows() {
         var wanted = rows.filter(t => !viewingToday || !t.archived)
-        var same = taskModel.count === wanted.length
-        if (same) for (var i = 0; i < wanted.length; ++i) if (taskModel.get(i).task_id !== wanted[i].task_id) { same = false; break }
-        if (!same) {
+        for (var w = 0; w < wanted.length; ++w) if (wanted[w].note === undefined) wanted[w].note = ""
+        var present = {}
+        for (var i = 0; i < taskModel.count; ++i) present[taskModel.get(i).task_id] = true
+        if (taskModel.count !== wanted.length || !wanted.every(t => present[t.task_id])) {
             taskModel.clear()
             for (var j = 0; j < wanted.length; ++j) taskModel.append(wanted[j])
-        } else {
-            for (var k = 0; k < wanted.length; ++k) {
-                for (var field in wanted[k]) if (taskModel.get(k)[field] !== wanted[k][field]) taskModel.setProperty(k, field, wanted[k][field])
-            }
+            return
+        }
+        for (var k = 0; k < wanted.length; ++k) {
+            if (taskModel.get(k).task_id !== wanted[k].task_id)
+                for (var m = k + 1; m < taskModel.count; ++m)
+                    if (taskModel.get(m).task_id === wanted[k].task_id) { taskModel.move(m, k, 1); break }
+            for (var field in wanted[k]) if (taskModel.get(k)[field] !== wanted[k][field]) taskModel.setProperty(k, field, wanted[k][field])
         }
     }
     onRowsChanged: syncRows()
@@ -64,6 +84,7 @@ FocusScope {
     Connections {
         target: root.service
         function onAcknowledged(requestId, success) {
+            if (success) root.localError = ""
             if (requestId === root.addRequest && success) {
                 if (newTask.text === root.submittedTitle) newTask.text = ""
                 newTask.forceActiveFocus()
@@ -251,12 +272,15 @@ FocusScope {
             Layout.minimumHeight: Style.space(100)
             ListView {
                 id: taskList
+                objectName: "taskList"
                 anchors.fill: parent
                 clip: true
                 spacing: Style.space(7)
                 model: taskModel
                 boundsBehavior: Flickable.StopAtBounds
                 Controls.ScrollBar.vertical: Controls.ScrollBar { policy: Controls.ScrollBar.AsNeeded }
+                move: Transition { NumberAnimation { properties: "y"; duration: 160; easing.type: Easing.OutCubic } }
+                moveDisplaced: Transition { NumberAnimation { properties: "y"; duration: 160; easing.type: Easing.OutCubic } }
                 delegate: Rectangle {
                     id: taskRow
                     required property int task_id
@@ -265,79 +289,244 @@ FocusScope {
                     required property int completed
                     required property int archived
                     required property bool running
+                    required property string note
                     property bool editing: false
+                    property bool editingTime: false
+                    property bool showNote: false
+                    readonly property bool canMove: root.viewingToday && !archived
                     width: taskList.width - Style.space(8)
-                    height: Style.space(70)
+                    height: Style.space(70) + (showNote ? noteBox.height + Style.space(10) : 0)
+                    Behavior on height { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                    clip: true
                     radius: Style.cornerRadius
                     color: running ? Qt.alpha(Color.accent, 0.09) : Qt.alpha(root.foreground, 0.025)
                     border.color: running ? Qt.alpha(Color.accent, 0.4) : Qt.alpha(root.foreground, 0.08)
-                    Rectangle { visible: taskRow.running; width: Style.space(3); height: parent.height * 0.48; anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; color: Color.accent }
-                    RowLayout {
+                    Rectangle { visible: taskRow.running; width: Style.space(3); height: Style.space(34); anchors.left: parent.left; anchors.top: parent.top; anchors.topMargin: Style.space(18); color: Color.accent }
+
+                    function openNote() {
+                        showNote = true
+                        noteField.text = note
+                        noteField.forceActiveFocus()
+                        noteField.cursorPosition = noteField.length
+                    }
+                    function saveNote() {
+                        if (!root.editable) return
+                        if (noteField.text.trim() !== note) root.service.send("setNote", {taskId: task_id, note: noteField.text})
+                    }
+                    function saveTime() {
+                        var ms = root.parseDuration(timeField.text)
+                        if (ms < 0 || ms > 86400000) { root.localError = "Enter a time like 1:30, 1h30m, 45m or 90 (minutes)."; return }
+                        if (root.editable) root.service.send("setTime", {taskId: task_id, elapsed_ms: ms, day: root.selected})
+                        editingTime = false
+                    }
+
+                    ColumnLayout {
                         anchors.fill: parent
                         anchors.margins: Style.space(10)
-                        spacing: Style.space(9)
-                        ActionButton {
-                            visible: root.viewingToday
-                            text: taskRow.completed ? "✓" : "○"
-                            hint: taskRow.completed ? "Reopen task, keeping its saved time" : "Complete task and save time"
-                            accent: !!taskRow.completed
-                            implicitWidth: Style.space(30)
-                            leftPadding: 0; rightPadding: 0
-                            enabled: root.editable
-                            onClicked: root.service.send(taskRow.completed ? "reopen" : "complete", {taskId: taskRow.task_id})
-                        }
-                        ColumnLayout {
+                        spacing: Style.space(10)
+                        RowLayout {
                             Layout.fillWidth: true
-                            spacing: Style.space(5)
-                            Text {
-                                visible: !taskRow.editing
-                                Layout.fillWidth: true
-                                text: taskRow.title; textFormat: Text.PlainText
-                                color: taskRow.completed ? root.secondary : root.foreground
-                                font.family: root.fontFamily; font.pixelSize: Style.font.body; font.strikeout: !!taskRow.completed
-                                elide: Text.ElideRight
-                                MouseArea {
-                                    anchors.fill: parent
-                                    enabled: root.viewingToday && root.editable
-                                    hoverEnabled: true
-                                    onDoubleClicked: { taskRow.editing = true; renameField.text = taskRow.title; renameField.forceActiveFocus(); renameField.selectAll() }
-                                    Controls.ToolTip.visible: containsMouse
-                                    Controls.ToolTip.text: taskRow.title + "\nDouble-click to rename"
-                                }
+                            Layout.preferredHeight: Style.space(50)
+                            spacing: Style.space(8)
+                            ActionButton {
+                                visible: root.viewingToday
+                                text: taskRow.completed ? "✓" : "○"
+                                hint: taskRow.completed ? "Reopen task, keeping its saved time" : "Complete task and save time"
+                                accent: !!taskRow.completed
+                                implicitWidth: Style.space(30)
+                                leftPadding: 0; rightPadding: 0
+                                enabled: root.editable
+                                onClicked: root.service.send(taskRow.completed ? "reopen" : "complete", {taskId: taskRow.task_id})
                             }
-                            Ui.TextField {
-                                id: renameField
-                                visible: taskRow.editing
+                            ColumnLayout {
                                 Layout.fillWidth: true
-                                maximumLength: 240
-                                Accessible.name: "Rename task"
-                                onAccepted: {
-                                    if (root.editable && text.trim()) {
-                                        root.service.send("rename", {taskId: taskRow.task_id, title: text})
-                                        taskRow.editing = false
+                                spacing: Style.space(5)
+                                Text {
+                                    visible: !taskRow.editing
+                                    Layout.fillWidth: true
+                                    text: taskRow.title; textFormat: Text.PlainText
+                                    color: taskRow.completed ? root.secondary : root.foreground
+                                    font.family: root.fontFamily; font.pixelSize: Style.font.body; font.strikeout: !!taskRow.completed
+                                    elide: Text.ElideRight
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        enabled: root.viewingToday && root.editable
+                                        hoverEnabled: true
+                                        onDoubleClicked: { taskRow.editing = true; renameField.text = taskRow.title; renameField.forceActiveFocus(); renameField.selectAll() }
+                                        Controls.ToolTip.visible: containsMouse
+                                        Controls.ToolTip.text: taskRow.title + "\nDouble-click to rename"
                                     }
                                 }
-                                Keys.onEscapePressed: event => { taskRow.editing = false; event.accepted = true }
+                                Ui.TextField {
+                                    id: renameField
+                                    visible: taskRow.editing
+                                    Layout.fillWidth: true
+                                    maximumLength: 240
+                                    Accessible.name: "Rename task"
+                                    onAccepted: {
+                                        if (root.editable && text.trim()) {
+                                            root.service.send("rename", {taskId: taskRow.task_id, title: text})
+                                            taskRow.editing = false
+                                        }
+                                    }
+                                    Keys.onEscapePressed: event => { taskRow.editing = false; event.accepted = true }
+                                    onActiveFocusChanged: if (!activeFocus) taskRow.editing = false
+                                }
+                                RowLayout {
+                                    spacing: Style.space(4)
+                                    Text {
+                                        visible: !taskRow.editingTime
+                                        text: root.duration(taskRow.elapsed_ms)
+                                        color: taskRow.running ? Color.accent : root.secondary
+                                        font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall
+                                        font.underline: timeMouse.containsMouse
+                                        MouseArea {
+                                            id: timeMouse
+                                            anchors.fill: parent
+                                            enabled: root.editable
+                                            hoverEnabled: true
+                                            cursorShape: Qt.IBeamCursor
+                                            onClicked: { taskRow.editingTime = true; timeField.text = root.duration(taskRow.elapsed_ms); timeField.forceActiveFocus(); timeField.selectAll() }
+                                            Controls.ToolTip.visible: containsMouse
+                                            Controls.ToolTip.text: "Click to edit recorded time"
+                                        }
+                                    }
+                                    Ui.TextField {
+                                        id: timeField
+                                        visible: taskRow.editingTime
+                                        implicitWidth: Style.space(96)
+                                        implicitHeight: Style.space(22)
+                                        verticalPadding: 1
+                                        font.pixelSize: Style.font.bodySmall
+                                        maximumLength: 12
+                                        Accessible.name: "Recorded time"
+                                        onAccepted: taskRow.saveTime()
+                                        Keys.onEscapePressed: event => { taskRow.editingTime = false; event.accepted = true }
+                                        onActiveFocusChanged: if (!activeFocus) taskRow.editingTime = false
+                                    }
+                                    Text {
+                                        visible: !taskRow.editingTime
+                                        text: taskRow.running ? "·  focusing" : taskRow.archived ? "·  archived" : taskRow.completed ? "·  completed" : "·  unfinished"
+                                        color: taskRow.running ? Color.accent : root.secondary
+                                        font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall
+                                    }
+                                    Text {
+                                        visible: taskRow.editingTime
+                                        text: "Enter saves · Esc cancels"
+                                        color: root.secondary; font.family: root.fontFamily; font.pixelSize: Style.font.caption
+                                    }
+                                }
                             }
-                            Text {
-                                text: root.duration(taskRow.elapsed_ms) + (taskRow.running ? "  ·  focusing" : taskRow.archived ? "  ·  archived" : taskRow.completed ? "  ·  completed" : "  ·  unfinished")
-                                color: taskRow.running ? Color.accent : root.secondary
-                                font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall
+                            ColumnLayout {
+                                visible: taskRow.canMove
+                                spacing: Style.space(2)
+                                Repeater {
+                                    model: [{glyph: "▲", to: "up", edge: "top"}, {glyph: "▼", to: "down", edge: "bottom"}]
+                                    delegate: ActionButton {
+                                        id: moveButton
+                                        required property var modelData
+                                        text: modelData.glyph
+                                        hint: "Move " + modelData.to + " · right-click for " + modelData.edge
+                                        subtle: true
+                                        implicitWidth: Style.space(24)
+                                        implicitHeight: Style.space(20)
+                                        padding: 0; leftPadding: 0; rightPadding: 0
+                                        font.pixelSize: Style.font.caption
+                                        enabled: root.editable
+                                        onClicked: root.service.send("move", {taskId: taskRow.task_id, to: modelData.to})
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            acceptedButtons: Qt.RightButton
+                                            enabled: moveButton.enabled
+                                            onClicked: root.service.send("move", {taskId: taskRow.task_id, to: moveButton.modelData.edge})
+                                        }
+                                    }
+                                }
+                            }
+                            ActionButton {
+                                text: "󰎞"
+                                hint: taskRow.showNote ? "Close note" : taskRow.note ? taskRow.note.slice(0, 240) + (taskRow.note.length > 240 ? "…" : "") : "Add a note"
+                                subtle: !taskRow.showNote
+                                leftPadding: Style.space(6); rightPadding: Style.space(6)
+                                font.pixelSize: Style.font.icon
+                                opacity: taskRow.note || taskRow.showNote ? 1 : 0.5
+                                contentItem: Text {
+                                    text: "󰎞"; font.family: root.fontFamily; font.pixelSize: Style.font.icon
+                                    color: taskRow.note ? Color.accent : root.foreground
+                                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                                }
+                                onClicked: taskRow.showNote ? (taskRow.saveNote(), taskRow.showNote = false) : taskRow.openNote()
+                            }
+                            ActionButton {
+                                text: !root.viewingToday ? "To today" : taskRow.completed ? "Reopen" : taskRow.running ? "Ⅱ" : "▶"
+                                hint: !root.viewingToday ? "Bring this task to today; preserve previous days" : taskRow.completed ? "Reopen to append more time" : taskRow.running ? "Pause timer" : "Start timer; pause any other task"
+                                accent: taskRow.running
+                                enabled: root.editable
+                                onClicked: root.service.send(!root.viewingToday ? "restore" : taskRow.completed ? "reopen" : taskRow.running ? "pause" : "start", {taskId: taskRow.task_id})
+                            }
+                            ActionButton {
+                                visible: root.viewingToday
+                                text: "×"; hint: "Archive task; keep all history"; subtle: true
+                                leftPadding: Style.space(4); rightPadding: Style.space(4)
+                                enabled: root.editable
+                                onClicked: root.service.send("archive", {taskId: taskRow.task_id})
                             }
                         }
-                        ActionButton {
-                            text: !root.viewingToday ? "To today" : taskRow.completed ? "Reopen" : taskRow.running ? "Ⅱ" : "▶"
-                            hint: !root.viewingToday ? "Bring this task to today; preserve previous days" : taskRow.completed ? "Reopen to append more time" : taskRow.running ? "Pause timer" : "Start timer; pause any other task"
-                            accent: taskRow.running
-                            enabled: root.editable
-                            onClicked: root.service.send(!root.viewingToday ? "restore" : taskRow.completed ? "reopen" : taskRow.running ? "pause" : "start", {taskId: taskRow.task_id})
-                        }
-                        ActionButton {
-                            visible: root.viewingToday
-                            text: "×"; hint: "Archive task; keep all history"; subtle: true
-                            leftPadding: Style.space(4); rightPadding: Style.space(4)
-                            enabled: root.editable
-                            onClicked: root.service.send("archive", {taskId: taskRow.task_id})
+
+                        Rectangle {
+                            id: noteBox
+                            visible: taskRow.showNote
+                            Layout.fillWidth: true
+                            height: Style.space(110)
+                            radius: Style.cornerRadius
+                            color: Qt.alpha(root.foreground, 0.04)
+                            border.color: noteField.activeFocus ? Color.accent : Qt.alpha(root.foreground, 0.1)
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: Style.space(6)
+                                spacing: Style.space(4)
+                                Controls.ScrollView {
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    clip: true
+                                    Controls.TextArea {
+                                        id: noteField
+                                        wrapMode: TextEdit.Wrap
+                                        textFormat: TextEdit.PlainText
+                                        placeholderText: "Notes for this task…"
+                                        color: root.foreground
+                                        placeholderTextColor: root.secondary
+                                        selectionColor: Style.selectionFill
+                                        selectedTextColor: root.foreground
+                                        font.family: root.fontFamily
+                                        font.pixelSize: Style.font.body
+                                        background: null
+                                        Accessible.name: "Task note"
+                                        onTextChanged: if (length > 4000) remove(4000, length)
+                                        Keys.onPressed: event => {
+                                            if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && event.modifiers & Qt.ControlModifier) {
+                                                taskRow.saveNote(); taskRow.showNote = false; event.accepted = true
+                                            }
+                                        }
+                                        Keys.onEscapePressed: event => { taskRow.showNote = false; event.accepted = true }
+                                        onActiveFocusChanged: if (!activeFocus && taskRow.showNote) taskRow.saveNote()
+                                    }
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "Ctrl+Enter saves · Esc closes without saving"
+                                        color: root.secondary; font.family: root.fontFamily; font.pixelSize: Style.font.caption
+                                    }
+                                    ActionButton {
+                                        text: "Save"; accent: true; implicitHeight: Style.space(22)
+                                        font.pixelSize: Style.font.bodySmall
+                                        enabled: root.editable
+                                        onClicked: { taskRow.saveNote(); taskRow.showNote = false }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -357,13 +546,14 @@ FocusScope {
         Text {
             visible: text !== ""
             Layout.fillWidth: true
-            text: root.service ? root.service.error || root.state.notice || (root.service.exported ? "Exported to " + root.service.exported : "") : "Connecting to Daybook…"
-            color: root.service && root.service.error ? Color.urgent : root.secondary
+            text: root.localError ? root.localError : root.service ? root.service.error || root.state.notice || (root.service.exported ? "Exported to " + root.service.exported : "") : "Connecting to Daybook…"
+            color: root.localError || (root.service && root.service.error) ? Color.urgent : root.secondary
             font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall
             wrapMode: Text.WrapAnywhere; textFormat: Text.PlainText
         }
         RowLayout {
             Layout.fillWidth: true
+            Layout.rightMargin: Style.space(18)
             Text {
                 Layout.fillWidth: true
                 text: !root.service || !root.service.ready ? "Connecting…" : root.service.pending ? "Saving…" : "●  Saved on this device · even at 00:00"
@@ -371,6 +561,43 @@ FocusScope {
                 elide: Text.ElideRight
             }
             ActionButton { text: "Export ↗"; hint: "Export all daily task times to CSV"; subtle: true; enabled: root.editable; onClicked: root.service.send("export") }
+        }
+    }
+
+    // Resize grip: drag to grow the panel, double-click to return to the default size.
+    Item {
+        id: grip
+        width: Style.space(18)
+        height: Style.space(18)
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.rightMargin: -Style.space(6)
+        anchors.bottomMargin: -Style.space(6)
+        Text {
+            anchors.centerIn: parent
+            text: "◢"
+            color: gripArea.pressed ? Color.accent : root.secondary
+            opacity: gripArea.containsMouse || gripArea.pressed ? 1 : 0.4
+            font.family: root.fontFamily; font.pixelSize: Style.space(11)
+        }
+        MouseArea {
+            id: gripArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.SizeFDiagCursor
+            property point last
+            onPressed: mouse => { last = mapToItem(null, mouse.x, mouse.y) }
+            onPositionChanged: mouse => {
+                if (!pressed) return
+                var point = mapToItem(null, mouse.x, mouse.y)
+                root.resizeBy(point.x - last.x, point.y - last.y)
+                last = point
+            }
+            onReleased: root.resizeFinished()
+            onDoubleClicked: root.resizeReset()
+            Controls.ToolTip.visible: containsMouse && !pressed
+            Controls.ToolTip.text: "Drag to resize the panel · Double-click to reset"
+            Controls.ToolTip.delay: 650
         }
     }
 }
