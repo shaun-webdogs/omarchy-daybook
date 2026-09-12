@@ -230,6 +230,11 @@ class Store:
                         self.db.execute("UPDATE days SET title=? WHERE task_id=? AND day=?", (title, task_id, today))
             elif action == "pause":
                 self.db.execute("DELETE FROM active")
+            elif action == "setSort":
+                sort = request.get("sort")
+                if sort not in ("time", "manual"):
+                    raise ValueError("Sort tasks by time or manually.")
+                self.db.execute("INSERT OR REPLACE INTO meta VALUES('sort', ?)", (sort,))
             elif action == "setPanel":
                 for key in ("width", "height"):
                     value = request.get(key, 0)
@@ -249,11 +254,12 @@ class Store:
             raise ValueError("Choose today or a previous date (YYYY-MM-DD).")
         active = self.db.execute("SELECT task_id FROM active").fetchone()
         active_id = active[0] if active else 0
+        sort = self.sort()
         def rows_for(day):
             rows = [dict(row) for row in self.db.execute("""
                 SELECT d.*, t.archived, t.note FROM days d JOIN tasks t ON t.id=d.task_id
-                WHERE day=? ORDER BY t.archived, d.completed, t.position, d.task_id
-            """, (day,))]
+                WHERE day=? ORDER BY t.archived, d.completed, CASE WHEN ?='time' THEN -d.elapsed_ms ELSE 0 END, t.position, d.task_id
+            """, (day, sort))]
             for row in rows:
                 row["running"] = row["task_id"] == active_id and day == today
             return rows
@@ -277,8 +283,12 @@ class Store:
         panel = {row[0][6:]: int(row[1]) for row in self.db.execute("SELECT key, value FROM meta WHERE key IN ('panel_width','panel_height')")}
         return {"today": today, "selected": selected, "tasks": rows, "today_tasks": today_rows, "dates": dates,
                 "active": dict(active_row) if active_row else None, "summary": summary,
-                "week": week, "notice": self.notice, "database": str(self.path),
+                "week": week, "notice": self.notice, "database": str(self.path), "sort": sort,
                 "panel": {"width": panel.get("width", 0), "height": panel.get("height", 0)}}
+
+    def sort(self):
+        row = self.db.execute("SELECT value FROM meta WHERE key='sort'").fetchone()
+        return row[0] if row and row[0] in ("time", "manual") else "time"
 
     def export_csv(self):
         output = io.StringIO()

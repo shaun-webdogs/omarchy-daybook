@@ -69,6 +69,7 @@ class StoreTests(unittest.TestCase):
         self.assertEqual([r["elapsed_ms"] for r in rows], [7000, 3000])
 
     def test_unfinished_and_zero_carry_through_offline_days(self):
+        self.command("setSort", sort="manual")
         self.add("Untimed")
         task = self.add("Timed")
         self.command("start", taskId=task)
@@ -145,6 +146,7 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.store.snapshot("2026-09-06")["tasks"][0]["title"], "Old title")
 
     def test_duplicate_names_have_independent_timers(self):
+        self.command("setSort", sort="manual")
         first, second = self.add("Same"), self.add("Same")
         self.assertNotEqual(first, second)
         self.command("start", taskId=second)
@@ -229,7 +231,26 @@ class StoreTests(unittest.TestCase):
     def titles(self, day=None):
         return [r["title"] for r in self.store.snapshot(day)["tasks"]]
 
+    def test_time_sort_is_default_and_follows_the_timer(self):
+        self.assertEqual(self.store.snapshot()["sort"], "time")
+        first, second, third = self.add("First"), self.add("Second"), self.add("Third")
+        self.assertEqual(self.titles(), ["First", "Second", "Third"])
+        self.command("start", taskId=third)
+        self.advance(3)
+        self.assertEqual(self.titles(), ["Third", "First", "Second"])
+        self.command("start", taskId=second)
+        self.advance(5)
+        self.assertEqual(self.titles(), ["Second", "Third", "First"])
+        self.command("complete", taskId=second)
+        self.assertEqual(self.titles(), ["Third", "First", "Second"])
+        self.command("setSort", sort="manual")
+        self.assertEqual(self.store.snapshot()["sort"], "manual")
+        self.assertEqual(self.titles(), ["First", "Third", "Second"])
+        with self.assertRaises(ValueError):
+            self.command("setSort", sort="alphabetical")
+
     def test_move_reorders_within_open_and_completed_groups(self):
+        self.command("setSort", sort="manual")
         for title in "ABCD":
             self.add(title)
         self.command("move", taskId=3, to="up")
@@ -254,6 +275,7 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.titles(), ["C", "B", "D"])
 
     def test_tasks_added_by_other_tools_queue_at_the_end(self):
+        self.command("setSort", sort="manual")
         self.add("Mine")
         self.store.db.execute("INSERT INTO tasks(title, created_day) VALUES('Synced', '2026-09-06')")
         self.store.db.execute("INSERT INTO days(task_id, day, title) VALUES(2, '2026-09-06', 'Synced')")
@@ -287,6 +309,7 @@ class StoreTests(unittest.TestCase):
                 PRAGMA user_version=1;
             """)
         self.store = Store(path, now=lambda: self.now)
+        self.command("setSort", sort="manual")
         self.assertEqual(self.titles(), ["Old", "Older"])
         self.assertEqual(self.store.snapshot()["tasks"][0]["note"], "")
         self.command("move", taskId=2, to="top")

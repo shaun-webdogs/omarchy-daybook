@@ -15,7 +15,8 @@ Native Quickshell UI · Live Omarchy themes · Local SQLite storage · MIT licen
 - Carry unfinished tasks into a new day while preserving each day's totals.
 - Correct a recorded time by clicking it, on today or any past day.
 - Keep a note on each task; the note icon lights up when there is one.
-- Reorder tasks with the arrows so the important work sits at the top.
+- Tasks with the most recorded time rise to the top as you work, or switch to
+  your own order and arrange them with the arrows.
 - Drag the corner to make the panel as tall or wide as your screen allows.
 - Browse previous days, use the seven-day chart, and export all history as CSV.
 - Use one shared timer across monitors; move the widget left, center, or right.
@@ -79,8 +80,11 @@ Nothing needs to be built.
 - **󰎞** opens a note under the task. Ctrl+Enter or **Save** stores it, Escape closes
   without saving, and clicking elsewhere saves any change. The icon turns accent
   when a note exists; hover it to read the note without opening it.
-- **▲ ▼** move a task one place; right-click them to send it to the top or bottom.
-  Open and completed tasks keep their own order.
+- By default the list shows **Most time first**: whichever task has the most
+  recorded time today sits at the top, and the running task climbs as it counts.
+  Click that label to switch to **My order**, where **▲ ▼** move a task one place
+  and right-clicking them sends it to the top or bottom. Open and completed
+  tasks keep their own order in both modes.
 - Drag the **◢** corner to resize the panel. The size is remembered on every
   monitor; double-click the corner to go back to the default.
 - **×** beside a task archives it without deleting any history.

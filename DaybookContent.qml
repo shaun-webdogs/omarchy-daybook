@@ -27,6 +27,7 @@ FocusScope {
     readonly property int taskCount: rows.filter(t => !t.archived).length
     readonly property double totalTime: rows.reduce((sum, t) => sum + t.elapsed_ms, 0)
     readonly property var active: state.active || null
+    readonly property bool sortByTime: (state.sort || "time") === "time"
     readonly property string fontFamily: Style.font.family
     implicitWidth: Style.space(460)
     implicitHeight: Style.space(636)
@@ -263,6 +264,15 @@ FocusScope {
                 color: root.secondary; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; font.letterSpacing: 1
             }
             Item { Layout.fillWidth: true }
+            ActionButton {
+                text: root.sortByTime ? "󰓅 Most time first" : "󰒺 My order"
+                hint: root.sortByTime ? "Tasks with the most recorded time rise to the top as you work. Click for your own order." : "Tasks stay where you put them with ▲ ▼. Click to sort by recorded time."
+                subtle: true
+                implicitHeight: Style.space(22)
+                font.pixelSize: Style.font.bodySmall
+                enabled: root.editable
+                onClicked: root.service.send("setSort", {sort: root.sortByTime ? "manual" : "time"})
+            }
             Text { text: root.completed + " / " + root.taskCount + " done"; color: root.secondary; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
         }
 
@@ -293,7 +303,7 @@ FocusScope {
                     property bool editing: false
                     property bool editingTime: false
                     property bool showNote: false
-                    readonly property bool canMove: root.viewingToday && !archived
+                    readonly property bool canMove: root.viewingToday && !archived && !root.sortByTime
                     width: taskList.width - Style.space(8)
                     height: Style.space(70) + (showNote ? noteBox.height + Style.space(10) : 0)
                     Behavior on height { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
