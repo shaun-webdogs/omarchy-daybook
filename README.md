@@ -77,9 +77,11 @@ Nothing needs to be built.
 - Click a task's time to correct it. Type `1:30`, `1:30:00`, `1h30m`, `45m`, or a bare
   number of minutes; Enter saves and Escape cancels. This works in History too, so
   a forgotten timer can be fixed on the day it belongs to.
-- **󰎞** opens a note under the task. Ctrl+Enter or **Save** stores it, Escape closes
-  without saving, and clicking elsewhere saves any change. The icon turns accent
-  when a note exists; hover it to read the note without opening it.
+- **󰎞** opens the task's note under it. Links in the note are clickable and open
+  in your browser. Press **󰏫** to edit: Ctrl+Enter or **Save** stores it, Escape
+  goes back without saving, and clicking elsewhere saves any change. An empty
+  note opens straight into editing. The icon turns accent when a note exists;
+  hover it to read the note without opening it.
 - By default the list shows **Most time first**: whichever task has the most
   recorded time today sits at the top, and the running task climbs as it counts.
   Click that label to switch to **My order**, where **▲ ▼** move a task one place

@@ -63,6 +63,11 @@ FocusScope {
         if ((m = s.match(/^(\d+(?:\.\d+)?)$/))) return Math.round(Number(m[1]) * 60000)
         return -1
     }
+    function linkify(text) {
+        var safe = String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+        safe = safe.replace(/(https?:\/\/[^\s<]+[^\s<.,;:!?)\]'"])/g, '<a href="$1">$1</a>')
+        return safe.replace(/\n/g, "<br>")
+    }
     function selectDay(day) {
         if (!editable) return
         service.send("snapshot", {date: day === today && !history ? "" : day})
@@ -485,6 +490,7 @@ FocusScope {
                     property bool editing: false
                     property bool editingTime: false
                     property bool showNote: false
+                    property bool editingNote: false
                     readonly property bool canMove: root.viewingToday && !archived && !root.sortByTime
                     width: taskList.width - Style.space(8)
                     height: Style.space(70) + (showNote ? noteBox.height + Style.space(10) : 0)
@@ -497,6 +503,11 @@ FocusScope {
 
                     function openNote() {
                         showNote = true
+                        if (note === "") editNote()
+                        else editingNote = false
+                    }
+                    function editNote() {
+                        editingNote = true
                         noteField.text = note
                         noteField.forceActiveFocus()
                         noteField.cursorPosition = noteField.length
@@ -504,6 +515,11 @@ FocusScope {
                     function saveNote() {
                         if (!root.editable) return
                         if (noteField.text.trim() !== note) root.service.send("setNote", {taskId: task_id, note: noteField.text})
+                    }
+                    function finishNote() {
+                        saveNote()
+                        editingNote = false
+                        if (noteField.text.trim() === "") showNote = false
                     }
                     function saveTime() {
                         var ms = root.parseDuration(timeField.text)
@@ -673,7 +689,7 @@ FocusScope {
                                     color: taskRow.note ? Color.accent : root.foreground
                                     horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
                                 }
-                                onClicked: taskRow.showNote ? (taskRow.saveNote(), taskRow.showNote = false) : taskRow.openNote()
+                                onClicked: taskRow.showNote ? (taskRow.editingNote && taskRow.saveNote(), taskRow.editingNote = false, taskRow.showNote = false) : taskRow.openNote()
                             }
                             ActionButton {
                                 text: !root.viewingToday ? "To today" : taskRow.completed ? "Reopen" : taskRow.running ? "Ⅱ" : "▶"
@@ -695,7 +711,7 @@ FocusScope {
                             id: noteBox
                             visible: taskRow.showNote
                             Layout.fillWidth: true
-                            height: Style.space(110)
+                            height: taskRow.editingNote ? Style.space(110) : Math.min(Style.space(180), noteView.implicitHeight + noteHint.implicitHeight + Style.space(22))
                             radius: Style.cornerRadius
                             color: Qt.alpha(root.foreground, 0.04)
                             border.color: noteField.activeFocus ? Color.accent : Qt.alpha(root.foreground, 0.1)
@@ -703,7 +719,34 @@ FocusScope {
                                 anchors.fill: parent
                                 anchors.margins: Style.space(6)
                                 spacing: Style.space(4)
+                                // Read view: links open in the browser; the pencil switches to editing.
+                                Flickable {
+                                    visible: !taskRow.editingNote
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    clip: true
+                                    contentHeight: noteView.implicitHeight
+                                    boundsBehavior: Flickable.StopAtBounds
+                                    Text {
+                                        id: noteView
+                                        width: parent.width
+                                        leftPadding: Style.space(4); rightPadding: Style.space(4); topPadding: Style.space(2)
+                                        text: root.linkify(taskRow.note)
+                                        textFormat: Text.RichText
+                                        wrapMode: Text.Wrap
+                                        color: root.foreground
+                                        linkColor: Color.accent
+                                        font.family: root.fontFamily; font.pixelSize: Style.font.body
+                                        onLinkActivated: link => Qt.openUrlExternally(link)
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            acceptedButtons: Qt.NoButton
+                                            cursorShape: noteView.hoveredLink ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                        }
+                                    }
+                                }
                                 Controls.ScrollView {
+                                    visible: taskRow.editingNote
                                     Layout.fillWidth: true
                                     Layout.fillHeight: true
                                     clip: true
@@ -723,25 +766,36 @@ FocusScope {
                                         onTextChanged: if (length > 4000) remove(4000, length)
                                         Keys.onPressed: event => {
                                             if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && event.modifiers & Qt.ControlModifier) {
-                                                taskRow.saveNote(); taskRow.showNote = false; event.accepted = true
+                                                taskRow.finishNote(); event.accepted = true
                                             }
                                         }
-                                        Keys.onEscapePressed: event => { taskRow.showNote = false; event.accepted = true }
-                                        onActiveFocusChanged: if (!activeFocus && taskRow.showNote) taskRow.saveNote()
+                                        Keys.onEscapePressed: event => { taskRow.editingNote = false; if (taskRow.note === "") taskRow.showNote = false; event.accepted = true }
+                                        onActiveFocusChanged: if (!activeFocus && taskRow.editingNote) taskRow.saveNote()
                                     }
                                 }
                                 RowLayout {
+                                    id: noteHint
                                     Layout.fillWidth: true
                                     Text {
                                         Layout.fillWidth: true
-                                        text: "Ctrl+Enter saves · Esc closes without saving"
+                                        text: taskRow.editingNote ? "Ctrl+Enter saves · Esc closes without saving" : "Click a link to open it"
                                         color: root.secondary; font.family: root.fontFamily; font.pixelSize: Style.font.caption
                                     }
                                     ActionButton {
+                                        visible: !taskRow.editingNote
+                                        text: "󰏫"; hint: "Edit note"; subtle: true
+                                        implicitHeight: Style.space(22); leftPadding: Style.space(6); rightPadding: Style.space(6)
+                                        font.pixelSize: Style.font.bodySmall
+                                        focusPolicy: Qt.NoFocus
+                                        enabled: root.editable
+                                        onClicked: taskRow.editNote()
+                                    }
+                                    ActionButton {
+                                        visible: taskRow.editingNote
                                         text: "Save"; accent: true; implicitHeight: Style.space(22)
                                         font.pixelSize: Style.font.bodySmall
                                         enabled: root.editable
-                                        onClicked: { taskRow.saveNote(); taskRow.showNote = false }
+                                        onClicked: taskRow.finishNote()
                                     }
                                 }
                             }
