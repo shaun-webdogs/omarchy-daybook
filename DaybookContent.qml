@@ -679,6 +679,7 @@ FocusScope {
                             }
                             ActionButton {
                                 text: "󰎞"
+                                focusPolicy: Qt.NoFocus
                                 hint: taskRow.showNote ? "Close note" : taskRow.note ? taskRow.note.slice(0, 240) + (taskRow.note.length > 240 ? "…" : "") : "Add a note"
                                 subtle: !taskRow.showNote
                                 leftPadding: Style.space(6); rightPadding: Style.space(6)
@@ -732,7 +733,7 @@ FocusScope {
                                         width: parent.width
                                         leftPadding: Style.space(4); rightPadding: Style.space(4); topPadding: Style.space(2)
                                         text: root.linkify(taskRow.note)
-                                        textFormat: Text.RichText
+                                        textFormat: Text.StyledText
                                         wrapMode: Text.Wrap
                                         color: root.foreground
                                         linkColor: Color.accent
