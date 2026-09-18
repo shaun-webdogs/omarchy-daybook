@@ -517,13 +517,18 @@ FocusScope {
                     property bool showNote: false
                     property bool editingNote: false
                     readonly property bool canMove: root.viewingToday && !archived && !root.sortByTime
+                    // Time already charged on the viewed day: mark it so worked-on tasks stand out.
+                    readonly property bool hasTime: elapsed_ms > 0
                     width: taskList.width - Style.space(8)
                     height: Style.space(70) + (showNote ? noteBox.height + Style.space(10) : 0)
                     Behavior on height { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
-                    clip: true
+                    // No clip on the row itself: at fractional scaling its clip rect snaps inward and
+                    // shaves off the top border. The content below clips instead, which still keeps the
+                    // note box from spilling out while the height animates.
                     radius: Style.cornerRadius
                     color: running ? Qt.alpha(Color.accent, 0.09) : Qt.alpha(root.foreground, 0.025)
-                    border.color: running ? Qt.alpha(Color.accent, 0.4) : Qt.alpha(root.foreground, 0.08)
+                    border.color: running ? Color.accent : hasTime ? Qt.alpha(Color.accent, 0.6) : Qt.alpha(root.foreground, 0.08)
+                    border.width: running || hasTime ? Math.max(2, Style.space(2.5)) : 1
                     Rectangle { visible: taskRow.running; width: Style.space(3); height: Style.space(34); anchors.left: parent.left; anchors.top: parent.top; anchors.topMargin: Style.space(18); color: Color.accent }
 
                     function openNote() {
@@ -557,6 +562,7 @@ FocusScope {
                         anchors.fill: parent
                         anchors.margins: Style.space(10)
                         spacing: Style.space(10)
+                        clip: true
                         RowLayout {
                             Layout.fillWidth: true
                             Layout.preferredHeight: Style.space(50)
