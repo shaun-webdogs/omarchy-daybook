@@ -519,6 +519,14 @@ FocusScope {
                     readonly property bool canMove: root.viewingToday && !archived && !root.sortByTime
                     // Time already charged on the viewed day: mark it so worked-on tasks stand out.
                     readonly property bool hasTime: elapsed_ms > 0
+                    // Origin comes from the marker sp-daybook-sync writes at the head of the note
+                    // (zd#/wr#/bc#). Hand-typed tasks have no note and get no dot.
+                    readonly property string source: note.indexOf("zd#") === 0 ? "Zendesk"
+                        : note.indexOf("wr#") === 0 ? "Wrike"
+                        : note.indexOf("bc#") === 0 ? "Basecamp" : ""
+                    readonly property color sourceColor: source === "Basecamp" ? "#3fb950"
+                        : source === "Zendesk" ? "#a371f7"
+                        : source === "Wrike" ? "#f0a868" : "transparent"
                     width: taskList.width - Style.space(8)
                     height: Style.space(70) + (showNote ? noteBox.height + Style.space(10) : 0)
                     Behavior on height { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
@@ -576,6 +584,19 @@ FocusScope {
                                 leftPadding: 0; rightPadding: 0
                                 enabled: root.editable
                                 onClicked: root.service.send(taskRow.completed ? "reopen" : "complete", {taskId: taskRow.task_id})
+                            }
+                            Rectangle {
+                                visible: taskRow.source !== ""
+                                implicitWidth: Style.space(9); implicitHeight: Style.space(9)
+                                radius: width / 2
+                                color: taskRow.sourceColor
+                                Layout.alignment: Qt.AlignVCenter
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    Controls.ToolTip.visible: containsMouse
+                                    Controls.ToolTip.text: "From " + taskRow.source
+                                }
                             }
                             ColumnLayout {
                                 Layout.fillWidth: true
