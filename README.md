@@ -70,6 +70,8 @@ Nothing needs to be built.
 ## Using Daybook
 
 - Click the **check icon and time** in the bar. Type a task and press Enter or **+ Add**.
+- Typing in that box also filters today's list by task name or note (every word must
+  match, Waiting tasks included), so you can find a ticket before starting it. Escape clears it.
 - Press **▶** to start. Starting another task pauses the previous one.
 - **Ⅱ** pauses; **○** completes the task and saves its total.
 - **Reopen** keeps the existing total. Press play to append more time.

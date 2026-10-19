@@ -70,7 +70,15 @@ FocusScope {
     // Tasks waiting on someone else fold into a section at the bottom of today's list.
     readonly property string waitingTag: state.waiting_tag || "Awaiting Client"
     property bool waitingOpen: false
+    // Typing in the add box filters today's list by title or note; every word must match.
+    property string filterText: ""
+    readonly property var filterWords: filterText.toLowerCase().split(/\s+/).filter(w => w !== "")
+    readonly property bool filtering: viewingToday && filterWords.length > 0
+    onFilterTextChanged: syncRows()
     property int waitingCount: 0
+    property int shownCount: 0
+    // Set by syncRows; bindings read these plain copies, since reading `filtering` can itself trigger syncRows.
+    property bool filterActive: false
     onWaitingOpenChanged: syncRows()
     readonly property string fontFamily: Style.font.family
     implicitWidth: Style.space(460)
@@ -115,9 +123,16 @@ FocusScope {
             for (var key of ["note", "tag", "origin", "link"]) if (wanted[w][key] === undefined) wanted[w][key] = ""
             wanted[w].group = viewingToday && wanted[w].tag === waitingTag && !wanted[w].completed ? "waiting" : ""
         }
+        if (filtering) wanted = wanted.filter(t => {
+            var text = (t.title + " " + t.note).toLowerCase()
+            return filterWords.every(w => text.indexOf(w) !== -1)
+        })
         var waiting = wanted.filter(t => t.group === "waiting")
         waitingCount = waiting.length
-        wanted = wanted.filter(t => t.group !== "waiting").concat(waitingOpen ? waiting : [])
+        // A search looks through Waiting too, so a match is never hidden in the folded section.
+        wanted = wanted.filter(t => t.group !== "waiting").concat(waitingOpen || filtering ? waiting : [])
+        shownCount = wanted.length
+        filterActive = filtering
         var present = {}
         for (var i = 0; i < taskModel.count; ++i) present[taskModel.get(i).task_id] = true
         if (taskModel.count !== wanted.length || !wanted.every(t => present[t.task_id])) {
@@ -476,10 +491,12 @@ FocusScope {
                 id: newTask
                 Layout.fillWidth: true
                 implicitHeight: Style.space(38)
-                placeholderText: "What would you like to work on?"
+                placeholderText: "Find a task, or add a new one"
                 maximumLength: 240
-                Accessible.name: "New task"
+                Accessible.name: "Find or add a task"
+                onTextChanged: root.filterText = text
                 onAccepted: root.addTask()
+                Keys.onEscapePressed: event => { if (text !== "") { text = ""; event.accepted = true } else event.accepted = false }
             }
             ActionButton { text: "+ Add"; accent: true; implicitHeight: Style.space(38); enabled: root.editable && newTask.text.trim() !== ""; onClicked: root.addTask() }
         }
@@ -537,7 +554,7 @@ FocusScope {
                 }
                 footer: Item {
                     width: taskList.width - Style.space(8)
-                    height: !root.waitingOpen && root.waitingCount ? Style.space(44) : 0
+                    height: !root.waitingOpen && !root.filterActive && root.waitingCount ? Style.space(44) : 0
                     visible: height > 0
                     WaitingToggle { anchors.fill: parent; anchors.topMargin: Style.space(8); open: false }
                 }
@@ -905,8 +922,15 @@ FocusScope {
                     }
                 }
             }
+            Text {
+                visible: root.filterActive && root.shownCount === 0
+                anchors.top: parent.top; anchors.topMargin: Style.space(12)
+                width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap
+                text: "No task matches \u201c" + root.filterText.trim() + "\u201d. Press Enter to add it."
+                color: root.secondary; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall
+            }
             Column {
-                visible: taskModel.count === 0 && root.waitingCount === 0
+                visible: root.shownCount === 0 && root.waitingCount === 0 && !root.filterActive
                 anchors.centerIn: parent
                 width: parent.width
                 spacing: Style.space(10)
