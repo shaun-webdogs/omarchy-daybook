@@ -90,6 +90,10 @@ Nothing needs to be built.
 - **󰓹** assigns one tag to a task from a dropdown, for statuses like *Awaiting
   Client*. The tag shows as a small pill beside the time. Manage the tag list in
   settings; removing a tag clears it from every task that had it.
+- Tasks tagged *Awaiting Client* fold into **Waiting on client (N)** at the
+  bottom of today's list. Click it to show or hide them.
+- Tasks added by another tool (see *Feeding tasks in* below) show a coloured dot
+  for where they came from. Click the dot to open the ticket.
 - **󰒓** opens settings: a slider for the panel's background opacity (text stays
   solid), plus reset buttons for opacity and panel size. Escape returns to tasks.
 - Drag the **◢** corner to resize the panel. The size is remembered on every
@@ -151,6 +155,24 @@ You can export to standard output without interrupting a live timer:
 ```bash
 python3 ~/.config/omarchy/plugins/shahin.daybook/daybook.py --export
 ```
+
+## Feeding tasks in
+
+`feed.py` lets a script keep another system's open items in Daybook. Each run
+hands it the full list for one source, and Daybook adds new items, completes the
+ones that left the list, and brings back an item that returns, but only if the
+feed closed it. Anything you complete, archive, rename, retag or re-note by hand
+stays the way you left it.
+
+```python
+from feed import Feed
+feed = Feed()
+print("\n".join(feed.reconcile("zendesk", [
+    {"ext_id": "123", "title": "#123 Fix the form", "note": "", "link": "https://...", "waiting": False},
+], apply=True)))
+```
+
+An empty list is refused rather than closing every task.
 
 ## Update, disable, or remove
 

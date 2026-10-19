@@ -19,6 +19,26 @@ FocusScope {
     property string tagMenuCurrent: ""
     property point tagMenuPos: Qt.point(0, 0)
     readonly property var tagList: state.tags || []
+    component WaitingToggle: Item {
+        property bool open: false
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: (open ? "▾  " : "▸  ") + "Waiting on client (" + root.waitingCount + ")"
+            color: root.secondary
+            font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall
+            font.underline: toggleMouse.containsMouse
+        }
+        MouseArea {
+            id: toggleMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.waitingOpen = !root.waitingOpen
+            Controls.ToolTip.visible: containsMouse
+            Controls.ToolTip.delay: 650
+            Controls.ToolTip.text: "Tasks tagged " + root.waitingTag + ". " + (open ? "Click to fold them away." : "Click to show them.")
+        }
+    }
     function openTagMenu(item, taskId, current) {
         var pos = item.mapToItem(root, 0, item.height + Style.space(4))
         tagMenuPos = Qt.point(Math.max(0, Math.min(pos.x, root.width - tagMenu.width)), Math.min(pos.y, root.height - tagMenu.height))
@@ -46,6 +66,11 @@ FocusScope {
     readonly property double totalTime: rows.reduce((sum, t) => sum + t.elapsed_ms, 0)
     readonly property var active: state.active || null
     readonly property bool sortByTime: (state.sort || "time") === "time"
+    // Tasks waiting on someone else fold into a section at the bottom of today's list.
+    readonly property string waitingTag: state.waiting_tag || "Awaiting Client"
+    property bool waitingOpen: false
+    property int waitingCount: 0
+    onWaitingOpenChanged: syncRows()
     readonly property string fontFamily: Style.font.family
     implicitWidth: Style.space(460)
     implicitHeight: Style.space(636)
@@ -86,9 +111,12 @@ FocusScope {
     function syncRows() {
         var wanted = rows.filter(t => !viewingToday || !t.archived)
         for (var w = 0; w < wanted.length; ++w) {
-            if (wanted[w].note === undefined) wanted[w].note = ""
-            if (wanted[w].tag === undefined) wanted[w].tag = ""
+            for (var key of ["note", "tag", "origin", "link"]) if (wanted[w][key] === undefined) wanted[w][key] = ""
+            wanted[w].group = viewingToday && wanted[w].tag === waitingTag && !wanted[w].completed ? "waiting" : ""
         }
+        var waiting = wanted.filter(t => t.group === "waiting")
+        waitingCount = waiting.length
+        wanted = wanted.filter(t => t.group !== "waiting").concat(waitingOpen ? waiting : [])
         var present = {}
         for (var i = 0; i < taskModel.count; ++i) present[taskModel.get(i).task_id] = true
         if (taskModel.count !== wanted.length || !wanted.every(t => present[t.task_id])) {
@@ -498,6 +526,20 @@ FocusScope {
                 clip: true
                 spacing: Style.space(7)
                 model: taskModel
+                section.property: "group"
+                section.delegate: Item {
+                    required property string section
+                    width: taskList.width - Style.space(8)
+                    height: section === "waiting" ? Style.space(30) : 0
+                    visible: section === "waiting"
+                    WaitingToggle { anchors.fill: parent; open: true }
+                }
+                footer: Item {
+                    width: taskList.width - Style.space(8)
+                    height: !root.waitingOpen && root.waitingCount ? Style.space(38) : 0
+                    visible: height > 0
+                    WaitingToggle { anchors.fill: parent; anchors.topMargin: Style.space(8); open: false }
+                }
                 boundsBehavior: Flickable.StopAtBounds
                 Controls.ScrollBar.vertical: Controls.ScrollBar { policy: Controls.ScrollBar.AsNeeded }
                 move: Transition { NumberAnimation { properties: "y"; duration: 160; easing.type: Easing.OutCubic } }
@@ -512,6 +554,8 @@ FocusScope {
                     required property bool running
                     required property string note
                     required property string tag
+                    required property string origin
+                    required property string link
                     property bool editing: false
                     property bool editingTime: false
                     property bool showNote: false
@@ -519,9 +563,10 @@ FocusScope {
                     readonly property bool canMove: root.viewingToday && !archived && !root.sortByTime
                     // Time already charged on the viewed day: mark it so worked-on tasks stand out.
                     readonly property bool hasTime: elapsed_ms > 0
-                    // Origin comes from the marker sp-daybook-sync writes at the head of the note
-                    // (zd#/wr#/bc#). Hand-typed tasks have no note and get no dot.
-                    readonly property string source: note.indexOf("zd#") === 0 ? "Zendesk"
+                    // Origin is the source a feed recorded; older rows fall back to the note's
+                    // zd#/wr#/bc# marker. Hand-typed tasks get no dot.
+                    readonly property string source: origin ? origin.charAt(0).toUpperCase() + origin.slice(1)
+                        : note.indexOf("zd#") === 0 ? "Zendesk"
                         : note.indexOf("wr#") === 0 ? "Wrike"
                         : note.indexOf("bc#") === 0 ? "Basecamp" : ""
                     readonly property color sourceColor: source === "Basecamp" ? "#3fb950"
@@ -593,9 +638,12 @@ FocusScope {
                                 Layout.alignment: Qt.AlignVCenter
                                 MouseArea {
                                     anchors.fill: parent
+                                    anchors.margins: -Style.space(6)
                                     hoverEnabled: true
+                                    cursorShape: taskRow.link ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                    onClicked: if (taskRow.link) Qt.openUrlExternally(taskRow.link)
                                     Controls.ToolTip.visible: containsMouse
-                                    Controls.ToolTip.text: "From " + taskRow.source
+                                    Controls.ToolTip.text: "From " + taskRow.source + (taskRow.link ? " · click to open" : "")
                                 }
                             }
                             ColumnLayout {
@@ -857,7 +905,7 @@ FocusScope {
                 }
             }
             Column {
-                visible: taskModel.count === 0
+                visible: taskModel.count === 0 && root.waitingCount === 0
                 anchors.centerIn: parent
                 width: parent.width
                 spacing: Style.space(10)

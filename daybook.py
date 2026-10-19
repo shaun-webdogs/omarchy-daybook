@@ -25,6 +25,10 @@ def next_midnight(milliseconds):
     return round(dt.datetime.combine(tomorrow, dt.time()).timestamp() * 1000)
 
 
+# Tasks with this tag sit in the panel's folded "Waiting" section instead of the main list.
+WAITING_TAG = "Awaiting Client"
+
+
 def data_directory():
     return Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share"))) / "omarchy-daybook"
 
@@ -70,6 +74,16 @@ class Store:
                 self.db.execute("ALTER TABLE tasks ADD COLUMN note TEXT NOT NULL DEFAULT ''")
             if "tag" not in columns:
                 self.db.execute("ALTER TABLE tasks ADD COLUMN tag TEXT NOT NULL DEFAULT ''")
+            # Where a task came from (feed.py writes these) and what the sync may still change.
+            # closed_by: '' open, 'sync' closed because the source closed, 'you' closed by hand.
+            # *_hand: you edited that field here, so a sync leaves it alone from then on.
+            for name, kind in (("source", "TEXT NOT NULL DEFAULT ''"), ("ext_id", "TEXT NOT NULL DEFAULT ''"),
+                               ("link", "TEXT NOT NULL DEFAULT ''"), ("closed_by", "TEXT NOT NULL DEFAULT ''"),
+                               ("title_hand", "INTEGER NOT NULL DEFAULT 0"), ("note_hand", "INTEGER NOT NULL DEFAULT 0"),
+                               ("tag_hand", "INTEGER NOT NULL DEFAULT 0")):
+                if name not in columns:
+                    self.db.execute(f"ALTER TABLE tasks ADD COLUMN {name} {kind}")
+            self.db.execute("CREATE UNIQUE INDEX IF NOT EXISTS tasks_by_source ON tasks(source, ext_id) WHERE source<>''")
             self._adopt_positions()
         self.notice = ""
         # Checkpoints already include their time in days. Never count offline time.
@@ -221,12 +235,12 @@ class Store:
                 if not task:
                     raise ValueError("This task could not be found.")
                 if action == "setNote":
-                    self.db.execute("UPDATE tasks SET note=? WHERE id=?", (self.note(request.get("note")), task_id))
+                    self.db.execute("UPDATE tasks SET note=?, note_hand=1 WHERE id=?", (self.note(request.get("note")), task_id))
                 elif action == "setTag":
                     tag = request.get("tag") or ""
                     if not isinstance(tag, str) or (tag and tag not in self.tags()):
                         raise ValueError("Choose a tag from the list, or none.")
-                    self.db.execute("UPDATE tasks SET tag=? WHERE id=?", (tag, task_id))
+                    self.db.execute("UPDATE tasks SET tag=?, tag_hand=1 WHERE id=?", (tag, task_id))
                 elif action == "setTime":
                     day = request.get("day") or today
                     if not isinstance(day, str) or dt.date.fromisoformat(day).isoformat() != day or day > today:
@@ -240,11 +254,11 @@ class Store:
                         raise ValueError("Bring this task back to today before moving it.")
                     self._move(task_id, request.get("to"), today)
                 elif action == "restore":
-                    self.db.execute("UPDATE tasks SET archived=0 WHERE id=?", (task_id,))
+                    self.db.execute("UPDATE tasks SET archived=0, closed_by='' WHERE id=?", (task_id,))
                     self.db.execute("INSERT OR IGNORE INTO days(task_id, day, title) VALUES(?,?,?)", (task_id, today, task["title"]))
                     self.db.execute("UPDATE days SET completed=0 WHERE task_id=? AND day=?", (task_id, today))
                 elif action == "archive":
-                    self.db.execute("UPDATE tasks SET archived=1 WHERE id=?", (task_id,))
+                    self.db.execute("UPDATE tasks SET archived=1, closed_by='you' WHERE id=?", (task_id,))
                     self.db.execute("DELETE FROM active WHERE task_id=?", (task_id,))
                 else:
                     entry = self.db.execute("SELECT * FROM days WHERE task_id=? AND day=?", (task_id, today)).fetchone()
@@ -257,11 +271,12 @@ class Store:
                         self.notice = ""
                     elif action in ("complete", "reopen"):
                         self.db.execute("UPDATE days SET completed=? WHERE task_id=? AND day=?", (int(action == "complete"), task_id, today))
+                        self.db.execute("UPDATE tasks SET closed_by=? WHERE id=?", ("you" if action == "complete" else "", task_id))
                         if action == "complete":
                             self.db.execute("DELETE FROM active WHERE task_id=?", (task_id,))
                     else:
                         title = self.title(request.get("title"))
-                        self.db.execute("UPDATE tasks SET title=? WHERE id=?", (title, task_id))
+                        self.db.execute("UPDATE tasks SET title=?, title_hand=1 WHERE id=?", (title, task_id))
                         self.db.execute("UPDATE days SET title=? WHERE task_id=? AND day=?", (title, task_id, today))
             elif action == "pause":
                 self.db.execute("DELETE FROM active")
@@ -301,7 +316,7 @@ class Store:
         sort = self.sort()
         def rows_for(day):
             rows = [dict(row) for row in self.db.execute("""
-                SELECT d.*, t.archived, t.note, t.tag FROM days d JOIN tasks t ON t.id=d.task_id
+                SELECT d.*, t.archived, t.note, t.tag, t.source AS origin, t.link FROM days d JOIN tasks t ON t.id=d.task_id
                 WHERE day=? ORDER BY t.archived, d.completed, CASE WHEN ?='time' THEN -d.elapsed_ms ELSE 0 END, t.position, d.task_id
             """, (day, sort))]
             for row in rows:
@@ -328,6 +343,7 @@ class Store:
         return {"today": today, "selected": selected, "tasks": rows, "today_tasks": today_rows, "dates": dates,
                 "active": dict(active_row) if active_row else None, "summary": summary,
                 "week": week, "notice": self.notice, "database": str(self.path), "sort": sort, "tags": self.tags(),
+                "waiting_tag": WAITING_TAG,
                 "panel": {"width": panel.get("width", 0), "height": panel.get("height", 0), "opacity": panel.get("opacity", 100)}}
 
     def sort(self):
