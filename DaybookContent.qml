@@ -24,10 +24,11 @@ FocusScope {
         Text {
             anchors.verticalCenter: parent.verticalCenter
             text: (open ? "▾  " : "▸  ") + "Waiting on client (" + root.waitingCount + ")"
-            color: root.secondary
-            font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall
+            color: root.foreground
+            font.family: root.fontFamily; font.pixelSize: Style.font.body
             font.underline: toggleMouse.containsMouse
         }
+        Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Qt.alpha(root.foreground, 0.18) }
         MouseArea {
             id: toggleMouse
             anchors.fill: parent
@@ -530,13 +531,13 @@ FocusScope {
                 section.delegate: Item {
                     required property string section
                     width: taskList.width - Style.space(8)
-                    height: section === "waiting" ? Style.space(30) : 0
+                    height: section === "waiting" ? Style.space(40) : 0
                     visible: section === "waiting"
-                    WaitingToggle { anchors.fill: parent; open: true }
+                    WaitingToggle { anchors.fill: parent; anchors.bottomMargin: Style.space(6); open: true }
                 }
                 footer: Item {
                     width: taskList.width - Style.space(8)
-                    height: !root.waitingOpen && root.waitingCount ? Style.space(38) : 0
+                    height: !root.waitingOpen && root.waitingCount ? Style.space(44) : 0
                     visible: height > 0
                     WaitingToggle { anchors.fill: parent; anchors.topMargin: Style.space(8); open: false }
                 }
